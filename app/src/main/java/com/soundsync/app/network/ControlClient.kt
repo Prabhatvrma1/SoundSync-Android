@@ -6,6 +6,7 @@ import com.soundsync.app.audio.sync.ClockSynchronizer
 import com.soundsync.app.audio.sync.SyncEngine
 import com.soundsync.app.data.model.ControlMessage
 import com.soundsync.app.data.model.StreamQualityPreset
+import com.soundsync.app.service.StreamStateHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -60,6 +61,7 @@ class ControlClient(
         disconnect()
 
         _connectionState.value = ConnectionState.CONNECTING
+        StreamStateHolder.slaveConnectionState.value = ConnectionState.CONNECTING
 
         listenJob = scope.launch(Dispatchers.IO) {
             try {
@@ -96,14 +98,21 @@ class ControlClient(
     private fun handleMessage(msg: ControlMessage, scope: CoroutineScope) {
         when (msg.type) {
             ControlMessage.Type.HANDSHAKE_ACK -> {
+                Log.d(TAG, "HANDSHAKE_ACK from master: ${msg.masterName}")
                 _connectionState.value = ConnectionState.CONNECTED
-                _masterName.value = msg.masterName ?: "Master Phone"
+                StreamStateHolder.slaveConnectionState.value = ConnectionState.CONNECTED
+                val name = msg.masterName ?: "Master Phone"
+                _masterName.value = name
+                StreamStateHolder.connectedMasterName.value = name
                 startNtpSync(scope)
                 startTelemetry(scope)
+                syncEngine.arm(scope)
             }
 
             ControlMessage.Type.HANDSHAKE_REJECT -> {
+                Log.w(TAG, "HANDSHAKE_REJECT: ${msg.errorMessage}")
                 _connectionState.value = ConnectionState.REJECTED
+                StreamStateHolder.slaveConnectionState.value = ConnectionState.REJECTED
                 disconnectInternal()
             }
 
@@ -148,12 +157,10 @@ class ControlClient(
     private fun startNtpSync(scope: CoroutineScope) {
         ntpJob?.cancel()
         ntpJob = scope.launch(Dispatchers.IO) {
-            // Rapid burst of 10 pings at startup for fast convergence
-            repeat(10) {
+            repeat(8) {
                 sendPing()
-                delay(60)
+                delay(25)
             }
-            // Periodic continuous synchronization ping every 1 second
             while (isActive) {
                 sendPing()
                 delay(1000)
@@ -165,6 +172,7 @@ class ControlClient(
         val t0 = System.nanoTime()
         val ping = ControlMessage(type = ControlMessage.Type.NTP_PING, originTimeNs = t0)
         writer?.println(ping.toJson())
+        writer?.flush()
     }
 
     private fun startTelemetry(scope: CoroutineScope) {
@@ -211,6 +219,7 @@ class ControlClient(
         socket = null
         if (_connectionState.value != ConnectionState.REJECTED) {
             _connectionState.value = ConnectionState.DISCONNECTED
+            StreamStateHolder.slaveConnectionState.value = ConnectionState.DISCONNECTED
         }
     }
 }

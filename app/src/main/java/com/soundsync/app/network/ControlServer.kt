@@ -4,6 +4,7 @@ import android.util.Log
 import com.soundsync.app.data.model.ControlMessage
 import com.soundsync.app.data.model.SlaveDevice
 import com.soundsync.app.data.model.StreamQualityPreset
+import com.soundsync.app.service.StreamStateHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -124,6 +125,7 @@ class ControlServer(
         if (index != -1) {
             list[index] = transform(list[index])
             _connectedSlaves.value = list
+            StreamStateHolder.connectedSlaves.value = list
         }
     }
 
@@ -135,6 +137,7 @@ class ControlServer(
         }
         clientHandlers.clear()
         _connectedSlaves.value = emptyList()
+        StreamStateHolder.connectedSlaves.value = emptyList()
         try {
             serverSocket?.close()
         } catch (e: Exception) {
@@ -200,6 +203,7 @@ class ControlServer(
                         ipAddress = socket.inetAddress?.hostAddress ?: "127.0.0.1"
                     )
                     _connectedSlaves.value = _connectedSlaves.value.filter { it.id != id } + device
+                    StreamStateHolder.connectedSlaves.value = _connectedSlaves.value
                     onSlaveConnected(device)
 
                     sendMessage(
@@ -208,14 +212,24 @@ class ControlServer(
                             masterName = masterName
                         )
                     )
+
+                    // If Master is already streaming, inform the new slave immediately
+                    if (StreamStateHolder.isStreaming.value) {
+                        sendMessage(
+                            ControlMessage(
+                                type = ControlMessage.Type.START_STREAM,
+                                scheduledStartMasterTimeNs = System.nanoTime() + 100_000_000L
+                            )
+                        )
+                    }
                 }
 
                 ControlMessage.Type.NTP_PING -> {
-                    // Record exact receive and transmit timestamps
+                    // Record exact receive and transmit timestamps with zero coroutine dispatch latency
                     val t1 = System.nanoTime()
                     val t0 = msg.originTimeNs ?: 0L
                     val t2 = System.nanoTime()
-                    sendMessage(
+                    sendMessageDirect(
                         ControlMessage(
                             type = ControlMessage.Type.NTP_PONG,
                             originTimeNs = t0,
@@ -246,6 +260,15 @@ class ControlServer(
             }
         }
 
+        fun sendMessageDirect(msg: ControlMessage) {
+            try {
+                writer?.println(msg.toJson())
+                writer?.flush()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error direct sending to $slaveId", e)
+            }
+        }
+
         fun sendMessage(msg: ControlMessage) {
             scope.launch(Dispatchers.IO) {
                 try {
@@ -265,6 +288,7 @@ class ControlServer(
             if (slaveId.isNotEmpty()) {
                 clientHandlers.remove(slaveId)
                 _connectedSlaves.value = _connectedSlaves.value.filter { it.id != slaveId }
+                StreamStateHolder.connectedSlaves.value = _connectedSlaves.value
                 onSlaveDisconnected(slaveId)
             }
             try {

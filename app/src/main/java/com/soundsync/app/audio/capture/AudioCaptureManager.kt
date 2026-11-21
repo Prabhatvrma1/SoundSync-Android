@@ -10,6 +10,7 @@ import android.os.Process
 import android.util.Log
 import com.soundsync.app.data.model.AudioPacket
 import com.soundsync.app.data.model.StreamQualityPreset
+import com.soundsync.app.service.StreamStateHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -78,6 +79,8 @@ class AudioCaptureManager {
         sequenceCounter.set(0)
         _captureState.value = CaptureState.INITIALIZING
         _statusMessage.value = "Configuring AudioPlaybackCapture..."
+        StreamStateHolder.captureState.value = CaptureState.INITIALIZING
+        StreamStateHolder.captureMessage.value = "Configuring AudioPlaybackCapture..."
 
         captureJob = scope.launch(Dispatchers.IO) {
             try {
@@ -122,6 +125,8 @@ class AudioCaptureManager {
                 isRunning.set(true)
                 _captureState.value = CaptureState.CAPTURING_SYSTEM
                 _statusMessage.value = "Capturing System Audio (48kHz Stereo)"
+                StreamStateHolder.captureState.value = CaptureState.CAPTURING_SYSTEM
+                StreamStateHolder.captureMessage.value = "Capturing System Audio (48kHz Stereo)"
 
                 Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
 
@@ -177,7 +182,8 @@ class AudioCaptureManager {
 
     fun startTestPulseOnly(
         preset: StreamQualityPreset = StreamQualityPreset.BALANCED,
-        scope: CoroutineScope
+        scope: CoroutineScope,
+        onPulseGenerated: ((ByteArray) -> Unit)? = null
     ) {
         if (isRunning.get()) stopCapture()
 
@@ -186,6 +192,8 @@ class AudioCaptureManager {
         isRunning.set(true)
         _captureState.value = CaptureState.GENERATING_TEST_PULSE
         _statusMessage.value = "Emitting Precision Sync Pulses (1kHz click @ 500ms)"
+        StreamStateHolder.captureState.value = CaptureState.GENERATING_TEST_PULSE
+        StreamStateHolder.captureMessage.value = "Emitting Precision Sync Pulses (1kHz click @ 500ms)"
 
         captureJob = scope.launch(Dispatchers.IO) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
@@ -201,6 +209,7 @@ class AudioCaptureManager {
                 generateClickPulsePcm(buffer, sampleRate, chunkFrameCount)
                 calculateRms(buffer)
                 emitPacket(buffer, chunkFrameCount, sampleRate, 2, startLoop)
+                onPulseGenerated?.invoke(buffer.copyOf())
 
                 val elapsedMs = (System.nanoTime() - startLoop) / 1_000_000
                 val sleepMs = frameDurationMs - elapsedMs
@@ -271,6 +280,7 @@ class AudioCaptureManager {
         val rms = Math.sqrt(sum / sampleCount)
         val normalized = (rms / 32768.0).toFloat().coerceIn(0f, 1f)
         _currentRms.value = normalized
+        StreamStateHolder.amplitude.value = normalized
     }
 
     fun stopCapture() {
@@ -281,6 +291,9 @@ class AudioCaptureManager {
         _captureState.value = CaptureState.IDLE
         _statusMessage.value = "Capture stopped"
         _currentRms.value = 0f
+        StreamStateHolder.captureState.value = CaptureState.IDLE
+        StreamStateHolder.captureMessage.value = "Capture stopped"
+        StreamStateHolder.amplitude.value = 0f
     }
 
     private fun cleanUpRecord() {

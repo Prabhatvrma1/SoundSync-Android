@@ -146,6 +146,11 @@ class AudioTrackPlayer(
         return (audioTrack?.playbackHeadPosition?.toLong() ?: 0L) and 0xFFFFFFFFL
     }
 
+    fun getUnplayedFrames(): Long {
+        val head = getPlaybackHeadPositionFrames()
+        return maxOf(0L, totalFramesWritten - head)
+    }
+
     fun getUnderrunCount(): Int {
         return try {
             audioTrack?.underrunCount ?: 0

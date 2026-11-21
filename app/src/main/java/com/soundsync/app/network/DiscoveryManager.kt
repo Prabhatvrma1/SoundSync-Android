@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.util.concurrent.ConcurrentHashMap
+import com.soundsync.app.service.StreamStateHolder
 
 data class DiscoveredMaster(
     val deviceName: String,
@@ -195,7 +196,9 @@ class DiscoveryManager(private val context: Context) {
     }
 
     private fun updateMasterList() {
-        _discoveredMasters.value = masterMap.values.toList().sortedBy { it.deviceName }
+        val list = masterMap.values.toList().sortedBy { it.deviceName }
+        _discoveredMasters.value = list
+        StreamStateHolder.discoveredMasters.value = list
     }
 
     fun stopDiscovery() {
@@ -210,5 +213,6 @@ class DiscoveryManager(private val context: Context) {
         }
         masterMap.clear()
         _discoveredMasters.value = emptyList()
+        StreamStateHolder.discoveredMasters.value = emptyList()
     }
 }

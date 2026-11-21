@@ -44,6 +44,10 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
+import android.app.Activity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -88,6 +92,7 @@ fun SlaveScreen(
     val masterName by viewModel.connectedMasterName.collectAsState()
     val metrics by viewModel.slaveMetrics.collectAsState()
     val discoveredMasters by viewModel.discoveredMasters.collectAsState()
+    val syncCalibrationOffset by viewModel.syncCalibrationOffsetMs.collectAsState()
 
     var pinInput by remember { mutableStateOf("") }
     var selectedMasterForPin by remember { mutableStateOf<DiscoveredMaster?>(null) }
@@ -95,6 +100,17 @@ fun SlaveScreen(
     var isLocalMuted by remember { mutableStateOf(false) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
+    val activity = context as? Activity
+    var showDisconnectConfirmDialog by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = true) {
+        if (connectionState == ControlClient.ConnectionState.CONNECTED || connectionState == ControlClient.ConnectionState.CONNECTING) {
+            showDisconnectConfirmDialog = true
+        } else {
+            viewModel.stopEverything()
+            onBackClick()
+        }
+    }
     var manualIpInput by remember { mutableStateOf("") }
     var manualPinInput by remember { mutableStateOf("7294") }
     var showManualConnect by remember { mutableStateOf(false) }
@@ -113,6 +129,48 @@ fun SlaveScreen(
 
     LaunchedEffect(Unit) {
         viewModel.startDiscoveringMasters()
+    }
+
+    if (showDisconnectConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDisconnectConfirmDialog = false },
+            title = {
+                Text(text = "SoundSync Receiver Active", color = TextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    text = "SoundSync is connected and playing audio. Would you like to keep audio playing in the background or disconnect?",
+                    color = TextSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDisconnectConfirmDialog = false
+                        activity?.moveTaskToBack(true)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Keep in Background", color = DarkBackground, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showDisconnectConfirmDialog = false
+                        viewModel.stopEverything()
+                        onBackClick()
+                    },
+                    border = androidx.compose.foundation.BorderStroke(1.dp, RedAlert),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Disconnect & Exit", color = RedAlert)
+                }
+            },
+            containerColor = DarkSurface
+        )
     }
 
     Scaffold(
@@ -142,7 +200,14 @@ fun SlaveScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = {
+                        if (connectionState == ControlClient.ConnectionState.CONNECTED || connectionState == ControlClient.ConnectionState.CONNECTING) {
+                            showDisconnectConfirmDialog = true
+                        } else {
+                            viewModel.stopEverything()
+                            onBackClick()
+                        }
+                    }) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Back",
@@ -318,6 +383,67 @@ fun SlaveScreen(
                                         fontSize = 13.sp,
                                         modifier = Modifier.padding(start = 8.dp)
                                     )
+                                }
+                            }
+                        }
+                    }
+
+                    // Audio Sync Fine-Tuning Calibration Card
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder)
+                        ) {
+                            Column(modifier = Modifier.padding(18.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Audio Sync Fine-Tuning",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "${if (syncCalibrationOffset > 0) "+" else ""}${syncCalibrationOffset.toInt()} ms",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CyanAccent
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Micro-adjust if phone speaker DAC latency differs from Leader",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Slider(
+                                    value = syncCalibrationOffset,
+                                    onValueChange = { viewModel.setSyncCalibrationOffset(it) },
+                                    valueRange = -100f..100f,
+                                    steps = 39,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = CyanAccent,
+                                        activeTrackColor = CyanAccent,
+                                        inactiveTrackColor = DarkCardBorder
+                                    )
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("-100ms", fontSize = 11.sp, color = TextMuted)
+                                    TextButton(onClick = { viewModel.setSyncCalibrationOffset(0f) }) {
+                                        Text("Reset to 0 ms", fontSize = 11.sp, color = CyanAccent)
+                                    }
+                                    Text("+100ms", fontSize = 11.sp, color = TextMuted)
                                 }
                             }
                         }

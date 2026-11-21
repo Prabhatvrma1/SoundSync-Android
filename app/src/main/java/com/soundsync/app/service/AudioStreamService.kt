@@ -145,6 +145,7 @@ class AudioStreamService : Service() {
         preset: StreamQualityPreset = StreamQualityPreset.BALANCED
     ) {
         _currentRole.value = DeviceRole.MASTER
+        StreamStateHolder.currentRole.value = DeviceRole.MASTER
         startForegroundServiceNotification("SoundSync Master - Ready", "Broadcasting presence...", withMediaProjection = false)
 
         audioSender.start()
@@ -219,14 +220,20 @@ class AudioStreamService : Service() {
         val proj = activeMediaProjection
         if (proj != null) {
             startForegroundServiceNotification("SoundSync Master - Streaming", "Streaming system audio", withMediaProjection = true)
+            player.pause()
             captureManager.startSystemAudioCapture(proj, preset, serviceScope)
         } else {
             startForegroundServiceNotification("SoundSync Master - Test Pulses", "Emitting 1kHz sync pulses", withMediaProjection = false)
-            captureManager.startTestPulseOnly(preset, serviceScope)
+            player.initialize()
+            player.play()
+            captureManager.startTestPulseOnly(preset, serviceScope, onPulseGenerated = { pcm ->
+                player.writePcm(pcm, 0)
+            })
         }
 
         controlServer?.broadcastStartStream(leadTimeMs = preset.bufferTargetMs, preset = preset)
         _isStreaming.value = true
+        StreamStateHolder.isStreaming.value = true
         updateNotification()
     }
 
@@ -247,6 +254,8 @@ class AudioStreamService : Service() {
 
     fun startAsSlave(slaveName: String, masterIp: String, pin: String?) {
         _currentRole.value = DeviceRole.SLAVE
+        StreamStateHolder.currentRole.value = DeviceRole.SLAVE
+        StreamStateHolder.slaveConnectionState.value = ControlClient.ConnectionState.CONNECTING
         startForegroundServiceNotification("SoundSync Receiver", "Connecting to master...", withMediaProjection = false)
 
         audioReceiver = AudioUdpReceiver { packet ->
@@ -265,6 +274,7 @@ class AudioStreamService : Service() {
         controlClient = client
         client.connect(masterIp = masterIp, pin = pin, scope = serviceScope)
         _isStreaming.value = true
+        StreamStateHolder.isStreaming.value = true
     }
 
     private fun startForegroundServiceNotification(title: String, text: String, withMediaProjection: Boolean = false) {
@@ -333,6 +343,9 @@ class AudioStreamService : Service() {
     fun stopAll() {
         _isStreaming.value = false
         _currentRole.value = DeviceRole.IDLE
+        StreamStateHolder.reset()
+        player.pause()
+        player.flush()
         captureManager.stopCapture()
         controlServer?.broadcastStopStream()
         controlServer?.stop()

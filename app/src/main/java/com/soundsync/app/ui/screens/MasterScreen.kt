@@ -38,6 +38,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.activity.compose.BackHandler
+import android.app.Activity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -94,6 +98,18 @@ fun MasterScreen(
     var showPairingDialogState by remember { mutableStateOf(false) }
     var presetMenuExpanded by remember { mutableStateOf(false) }
     var localIp by remember { mutableStateOf("Wi-Fi") }
+    var showStopConfirmDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val activity = context as? Activity
+
+    BackHandler(enabled = true) {
+        if (isStreaming || connectedSlaves.isNotEmpty()) {
+            showStopConfirmDialog = true
+        } else {
+            viewModel.stopEverything()
+            onBackClick()
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -110,6 +126,48 @@ fun MasterScreen(
             masterIp = localIp,
             deviceName = deviceName,
             onDismiss = { showPairingDialogState = false }
+        )
+    }
+
+    if (showStopConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showStopConfirmDialog = false },
+            title = {
+                Text(text = "SoundSync Master Active", color = TextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    text = "SoundSync is streaming audio to connected speaker devices. Would you like to keep streaming in the background or stop the session?",
+                    color = TextSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showStopConfirmDialog = false
+                        activity?.moveTaskToBack(true)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Keep in Background", color = DarkBackground, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showStopConfirmDialog = false
+                        viewModel.stopEverything()
+                        onBackClick()
+                    },
+                    border = androidx.compose.foundation.BorderStroke(1.dp, RedAlert),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Stop & Exit", color = RedAlert)
+                }
+            },
+            containerColor = DarkSurface
         )
     }
 
@@ -132,7 +190,14 @@ fun MasterScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = {
+                        if (isStreaming || connectedSlaves.isNotEmpty()) {
+                            showStopConfirmDialog = true
+                        } else {
+                            viewModel.stopEverything()
+                            onBackClick()
+                        }
+                    }) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Back",

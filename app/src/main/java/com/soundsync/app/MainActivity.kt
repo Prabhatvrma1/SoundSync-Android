@@ -135,7 +135,6 @@ fun AppNavigation(
                 viewModel = viewModel,
                 onRequestMediaProjection = onRequestMediaProjection,
                 onBackClick = {
-                    viewModel.stopEverything()
                     navController.popBackStack("home", inclusive = false)
                 }
             )
@@ -144,7 +143,6 @@ fun AppNavigation(
             SlaveScreen(
                 viewModel = viewModel,
                 onBackClick = {
-                    viewModel.stopEverything()
                     navController.popBackStack("home", inclusive = false)
                 }
             )

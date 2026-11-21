@@ -5,6 +5,7 @@ import com.soundsync.app.audio.playback.AudioTrackPlayer
 import com.soundsync.app.data.model.AudioPacket
 import com.soundsync.app.data.model.StreamQualityPreset
 import com.soundsync.app.data.model.SyncMetrics
+import com.soundsync.app.service.StreamStateHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,20 +19,28 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Orchestrates Clock Synchronization, Jitter Buffering, Scheduled Playback,
- * and Continuous Drift Correction on the Slave device.
+ * and Continuous Phase-Locked Loop (PLL) Drift Correction on the Slave device.
  */
 class SyncEngine(
     val clockSynchronizer: ClockSynchronizer,
     val player: AudioTrackPlayer
 ) {
-    private val jitterBuffer = JitterBuffer(targetBufferMs = 200, sampleRate = player.sampleRate)
-    private val driftDetector = DriftDetector(sampleRate = player.sampleRate)
+    companion object {
+        private const val TAG = "SyncEngine"
+        // Target playout buffer depth: 100ms
+        const val TARGET_BUFFER_MS = 100
+        const val TARGET_BUFFER_NS = TARGET_BUFFER_MS * 1_000_000L
+    }
 
+    private val jitterBuffer = JitterBuffer(targetBufferMs = 200, sampleRate = player.sampleRate)
     private val isRunning = AtomicBoolean(false)
     private var playbackJob: Job? = null
 
     private val _syncMetrics = MutableStateFlow(SyncMetrics())
     val syncMetrics: StateFlow<SyncMetrics> = _syncMetrics.asStateFlow()
+
+    @Volatile
+    var calibrationOffsetMs: Float = 0f
 
     @Volatile
     var isDecompressingAdpcm: Boolean = false
@@ -40,74 +49,124 @@ class SyncEngine(
         jitterBuffer.push(packet)
     }
 
+    /**
+     * Arms the playback engine as soon as the slave connects and completes handshake.
+     */
+    fun arm(scope: CoroutineScope) {
+        if (isRunning.get()) return
+        startPlaybackLoop(scope, StreamQualityPreset.BALANCED)
+    }
+
     fun scheduleStart(
         targetStartMasterTimeNs: Long,
         preset: StreamQualityPreset,
         scope: CoroutineScope
     ) {
+        startPlaybackLoop(scope, preset)
+    }
+
+    private fun startPlaybackLoop(scope: CoroutineScope, preset: StreamQualityPreset) {
         stop()
 
         isRunning.set(true)
         player.initialize()
+        player.play()
 
         playbackJob = scope.launch(Dispatchers.Default) {
-            val targetStartLocalNs = clockSynchronizer.toLocalTime(targetStartMasterTimeNs)
-
-            // Wait until scheduled local start time
-            var nowNs = System.nanoTime()
-            val initialWaitNs = targetStartLocalNs - nowNs
-            if (initialWaitNs > 0) {
-                val waitMs = initialWaitNs / 1_000_000
-                val waitRemNs = (initialWaitNs % 1_000_000).toInt()
-                if (waitMs > 0) delay(waitMs)
-                // Busy wait for the final fractional millisecond for sub-millisecond precision
-                while (System.nanoTime() < targetStartLocalNs && isActive) {
-                    // spin
-                }
+            // Wait for initial clock synchronization (up to 300ms)
+            var syncWaitAttempts = 0
+            while (!clockSynchronizer.isSynchronized && syncWaitAttempts < 30 && isActive && isRunning.get()) {
+                delay(10)
+                syncWaitAttempts++
             }
 
-            player.play()
-            val initialHeadFrames = player.getPlaybackHeadPositionFrames()
-            driftDetector.onPlaybackStarted(targetStartMasterTimeNs, initialHeadFrames)
+            // Prime jitter buffer with at least 3 packets (30ms) before starting playout
+            var primeWaitAttempts = 0
+            while (jitterBuffer.size() < 3 && primeWaitAttempts < 50 && isActive && isRunning.get()) {
+                delay(5)
+                primeWaitAttempts++
+            }
 
             while (isActive && isRunning.get()) {
                 val packet = jitterBuffer.pollNext()
-                if (packet != null) {
-                    val pcmBytes = if (isDecompressingAdpcm) {
-                        AudioCompressor.decode(packet.payload, packet.channels)
-                    } else {
-                        packet.payload
-                    }
-
-                    // Check clock drift against AudioTrack head
-                    val currentMasterTime = clockSynchronizer.toMasterTime(System.nanoTime())
-                    val currentHead = player.getPlaybackHeadPositionFrames()
-                    val driftAdj = driftDetector.checkDrift(currentMasterTime, currentHead)
-
-                    if (driftDetector.isHardDrift()) {
-                        // Resynchronize on major network jitter
-                        player.flush()
-                        driftDetector.onPlaybackStarted(currentMasterTime, player.getPlaybackHeadPositionFrames())
-                    }
-
-                    player.writePcm(pcmBytes, driftAdj)
-                } else {
-                    // Buffer starving: yield slightly
+                if (packet == null) {
+                    // Buffer starving: yield briefly
                     delay(2)
+                    continue
                 }
 
-                // Update Telemetry Metrics every loop
-                _syncMetrics.value = SyncMetrics(
+                val pcmBytes = if (isDecompressingAdpcm) {
+                    AudioCompressor.decode(packet.payload, packet.channels)
+                } else {
+                    packet.payload
+                }
+
+                // If not yet synchronized, play as best effort
+                if (!clockSynchronizer.isSynchronized) {
+                    player.writePcm(pcmBytes, 0)
+                    continue
+                }
+
+                // Precision Phase-Locked Loop (PLL) Timing calculation:
+                // Desired presentation time on slave in local nanoseconds
+                val packetLocalNs = clockSynchronizer.toLocalTime(packet.masterTimestampNs)
+                val targetBufferNs = preset.bufferTargetMs * 1_000_000L
+                val userOffsetNs = (calibrationOffsetMs * 1_000_000L).toLong()
+                val targetPresentationNs = packetLocalNs + targetBufferNs + userOffsetNs
+
+                // When would this chunk exit the speaker if written right now?
+                val unplayedFrames = player.getUnplayedFrames()
+                val unplayedNs = (unplayedFrames * 1_000_000_000L) / player.sampleRate
+                val nowNs = System.nanoTime()
+                val estimatedSpeakerNs = nowNs + unplayedNs
+
+                val timingErrorNs = estimatedSpeakerNs - targetPresentationNs
+                val timingErrorMs = timingErrorNs / 1_000_000f
+
+                when {
+                    // Severe Lag (> 70ms late): flush AudioTrack and resume for immediate recovery
+                    timingErrorMs > 70f -> {
+                        player.flush()
+                        player.writePcm(pcmBytes, 0)
+                    }
+
+                    // Moderate Lag (10ms to 70ms late): speed up slightly (drop 1 micro-frame)
+                    timingErrorMs > 10f -> {
+                        player.writePcm(pcmBytes, -1)
+                    }
+
+                    // Too early (> 15ms ahead): yield so hardware plays down buffer towards target
+                    timingErrorMs < -15f -> {
+                        val waitMs = (-timingErrorMs).toLong().coerceIn(1L, 15L)
+                        delay(waitMs)
+                        player.writePcm(pcmBytes, 0)
+                    }
+
+                    // Mild lead (-15ms to -5ms ahead): slow down slightly (duplicate 1 micro-frame)
+                    timingErrorMs < -5f -> {
+                        player.writePcm(pcmBytes, 1)
+                    }
+
+                    // Phase Locked (-5ms to +10ms): zero adjustment needed
+                    else -> {
+                        player.writePcm(pcmBytes, 0)
+                    }
+                }
+
+                // Update Telemetry Metrics
+                val metrics = SyncMetrics(
                     rttMs = clockSynchronizer.currentRttMs,
                     clockOffsetMs = clockSynchronizer.estimatedOffsetNs / 1_000_000f,
                     bufferHealthMs = jitterBuffer.getBufferedDurationMs(),
                     targetBufferMs = preset.bufferTargetMs,
-                    driftMs = driftDetector.currentDriftMs,
+                    driftMs = timingErrorMs,
                     packetLossPct = jitterBuffer.getPacketLossPercentage(),
                     underrunCount = player.getUnderrunCount(),
                     isSynchronized = clockSynchronizer.isSynchronized,
                     playbackActive = true
                 )
+                _syncMetrics.value = metrics
+                StreamStateHolder.syncMetrics.value = metrics
             }
         }
     }
@@ -119,7 +178,7 @@ class SyncEngine(
         player.pause()
         player.flush()
         jitterBuffer.clear()
-        driftDetector.reset()
         _syncMetrics.value = SyncMetrics()
+        StreamStateHolder.syncMetrics.value = SyncMetrics()
     }
 }

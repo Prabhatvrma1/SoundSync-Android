@@ -13,6 +13,7 @@ import com.soundsync.app.data.model.SyncMetrics
 import com.soundsync.app.network.ControlClient
 import com.soundsync.app.network.DiscoveredMaster
 import com.soundsync.app.service.AudioStreamService
+import com.soundsync.app.service.StreamStateHolder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,43 +30,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedPreset = MutableStateFlow(StreamQualityPreset.BALANCED)
     val selectedPreset: StateFlow<StreamQualityPreset> = _selectedPreset.asStateFlow()
 
-    val currentRole: StateFlow<DeviceRole>
-        get() = AudioStreamService.instance?.currentRole ?: MutableStateFlow(DeviceRole.IDLE)
+    val currentRole: StateFlow<DeviceRole> = StreamStateHolder.currentRole.asStateFlow()
 
-    val isStreaming: StateFlow<Boolean>
-        get() = AudioStreamService.instance?.isStreaming ?: MutableStateFlow(false)
+    val isStreaming: StateFlow<Boolean> = StreamStateHolder.isStreaming.asStateFlow()
 
-    val captureState: StateFlow<AudioCaptureManager.CaptureState>
-        get() = AudioStreamService.instance?.captureManager?.captureState
-            ?: MutableStateFlow(AudioCaptureManager.CaptureState.IDLE)
+    val captureState: StateFlow<AudioCaptureManager.CaptureState> = StreamStateHolder.captureState.asStateFlow()
 
-    val captureMessage: StateFlow<String>
-        get() = AudioStreamService.instance?.captureManager?.statusMessage
-            ?: MutableStateFlow("Idle")
+    val captureMessage: StateFlow<String> = StreamStateHolder.captureMessage.asStateFlow()
 
-    val amplitude: StateFlow<Float>
-        get() = AudioStreamService.instance?.captureManager?.currentRms
-            ?: MutableStateFlow(0f)
+    val amplitude: StateFlow<Float> = StreamStateHolder.amplitude.asStateFlow()
 
-    val connectedSlaves: StateFlow<List<SlaveDevice>>
-        get() = AudioStreamService.instance?.controlServer?.connectedSlaves
-            ?: MutableStateFlow(emptyList())
+    val connectedSlaves: StateFlow<List<SlaveDevice>> = StreamStateHolder.connectedSlaves.asStateFlow()
 
-    val discoveredMasters: StateFlow<List<DiscoveredMaster>>
-        get() = AudioStreamService.instance?.discoveryManager?.discoveredMasters
-            ?: MutableStateFlow(emptyList())
+    val discoveredMasters: StateFlow<List<DiscoveredMaster>> = StreamStateHolder.discoveredMasters.asStateFlow()
 
-    val slaveConnectionState: StateFlow<ControlClient.ConnectionState>
-        get() = AudioStreamService.instance?.controlClient?.connectionState
-            ?: MutableStateFlow(ControlClient.ConnectionState.DISCONNECTED)
+    val slaveConnectionState: StateFlow<ControlClient.ConnectionState> = StreamStateHolder.slaveConnectionState.asStateFlow()
 
-    val slaveMetrics: StateFlow<SyncMetrics>
-        get() = AudioStreamService.instance?.syncEngine?.syncMetrics
-            ?: MutableStateFlow(SyncMetrics())
+    val slaveMetrics: StateFlow<SyncMetrics> = StreamStateHolder.syncMetrics.asStateFlow()
 
-    val connectedMasterName: StateFlow<String?>
-        get() = AudioStreamService.instance?.controlClient?.masterName
-            ?: MutableStateFlow("Master")
+    val connectedMasterName: StateFlow<String?> = StreamStateHolder.connectedMasterName.asStateFlow()
+
+    val syncCalibrationOffsetMs: StateFlow<Float> = StreamStateHolder.syncCalibrationOffsetMs.asStateFlow()
+
+    fun setSyncCalibrationOffset(offsetMs: Float) {
+        StreamStateHolder.syncCalibrationOffsetMs.value = offsetMs
+        AudioStreamService.instance?.syncEngine?.calibrationOffsetMs = offsetMs
+    }
 
     private val _isTestToneActive = MutableStateFlow(false)
     val isTestToneActive: StateFlow<Boolean> = _isTestToneActive.asStateFlow()
