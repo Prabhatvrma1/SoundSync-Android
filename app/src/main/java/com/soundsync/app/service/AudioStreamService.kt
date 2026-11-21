@@ -183,6 +183,14 @@ class AudioStreamService : Service() {
 
     fun handleStartProjection(resultCode: Int, resultData: Intent) {
         try {
+            // Android 14+ STRICT REQUIREMENT: MUST promote service to FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            // BEFORE calling projectionManager.getMediaProjection(), otherwise Android throws SecurityException!
+            startForegroundServiceNotification(
+                "SoundSync Master – Streaming",
+                "Capturing & streaming system audio",
+                withMediaProjection = true
+            )
+
             val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? android.media.projection.MediaProjectionManager
             val projection = projectionManager?.getMediaProjection(resultCode, resultData)
 
@@ -327,14 +335,14 @@ class AudioStreamService : Service() {
         val notification = buildNotification(title, text)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val type = if (withMediaProjection && activeMediaProjection != null) {
+                val type = if (withMediaProjection) {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
                 } else {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
                 }
                 startForeground(NOTIFICATION_ID, notification, type)
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val type = if (withMediaProjection && activeMediaProjection != null) {
+                val type = if (withMediaProjection) {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 } else {
                     0
