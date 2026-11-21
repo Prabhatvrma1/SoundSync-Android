@@ -40,7 +40,7 @@ class AudioTrackPlayer(
 
     private var totalFramesWritten: Long = 0L
 
-    fun initialize(): Boolean {
+    fun initialize(bufferTargetMs: Int = 30): Boolean {
         try {
             release()
 
@@ -48,8 +48,9 @@ class AudioTrackPlayer(
             val encoding = AudioFormat.ENCODING_PCM_16BIT
 
             val minBufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, encoding)
-            // Ultra-low latency buffer size: 30ms of audio (eliminates 70ms of hardware lag)
-            val targetBufferSize = maxOf(minBufferSize, (sampleRate * channels * 2 * 0.03).toInt())
+            // Adapt buffer size to latency profile: 15ms for Type-C wire speed up to 250ms
+            val bufferDurationSec = (bufferTargetMs / 1000.0).coerceIn(0.015, 0.250)
+            val targetBufferSize = maxOf(minBufferSize, (sampleRate * channels * 2 * bufferDurationSec).toInt())
 
             val attributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -62,7 +63,7 @@ class AudioTrackPlayer(
                 .setEncoding(encoding)
                 .build()
 
-            audioTrack = AudioTrack.Builder()
+            val track = AudioTrack.Builder()
                 .setAudioAttributes(attributes)
                 .setAudioFormat(format)
                 .setBufferSizeInBytes(targetBufferSize)
@@ -70,6 +71,14 @@ class AudioTrackPlayer(
                 .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                 .build()
 
+            // On Android 7.0+ (API 24+), setBufferSizeInFrames minimizes the hardware HAL buffer
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                val desiredFrames = (sampleRate * bufferDurationSec).toInt()
+                val minFrames = minBufferSize / (channels * 2)
+                track.setBufferSizeInFrames(maxOf(minFrames, desiredFrames))
+            }
+
+            audioTrack = track
             if (audioTrack?.state != AudioTrack.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioTrack failed to initialize")
                 return false

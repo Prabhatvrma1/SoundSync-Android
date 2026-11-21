@@ -7,6 +7,13 @@ enum class StreamQualityPreset(
     val bufferTargetMs: Int,
     val description: String
 ) {
+    TYPE_C_WIRE(
+        title = "Type-C Cable (Cinema / 15ms)",
+        sampleRate = 48000,
+        frameDurationMs = 5,
+        bufferTargetMs = 15,
+        description = "Hardware wire speed (15ms delay) via USB-C cable — perfect zero-lag movie lip-sync"
+    ),
     ULTRA_LOW(
         title = "Ultra Low (Hotspot/Gaming)",
         sampleRate = 48000,

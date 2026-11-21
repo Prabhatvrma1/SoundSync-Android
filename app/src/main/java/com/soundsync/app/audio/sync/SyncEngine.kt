@@ -69,7 +69,7 @@ class SyncEngine(
         stop()
 
         isRunning.set(true)
-        player.initialize()
+        player.initialize(preset.bufferTargetMs)
         player.play()
 
         playbackJob = scope.launch(Dispatchers.Default) {
@@ -79,8 +79,12 @@ class SyncEngine(
                 delay(10)
             }
 
-            // Prime jitter buffer: 2 packets for ultra low latency (20ms), 4 for higher presets
-            val minPrimePackets = if (preset.bufferTargetMs <= 75) 2 else 4
+            // Prime jitter buffer: 1 packet for Type-C wire (5ms), 2 for ultra-low (20ms), 4 for higher presets
+            val minPrimePackets = when {
+                preset.bufferTargetMs <= 15 -> 1
+                preset.bufferTargetMs <= 75 -> 2
+                else -> 4
+            }
             var primeWaitAttempts = 0
             while (jitterBuffer.size() < minPrimePackets && primeWaitAttempts < 60 && isActive && isRunning.get()) {
                 delay(5)
@@ -124,10 +128,10 @@ class SyncEngine(
                 val timingErrorMs = timingErrorNs / 1_000_000f
 
                 // Dynamic PLL thresholds adapted to the selected latency profile
-                val flushLagThreshold = maxOf(35f, preset.bufferTargetMs * 0.50f)
-                val microLagThreshold = maxOf(6f, preset.bufferTargetMs * 0.12f)
-                val microLeadThreshold = -maxOf(4f, preset.bufferTargetMs * 0.10f)
-                val severeLeadThreshold = -maxOf(12f, preset.bufferTargetMs * 0.25f)
+                val flushLagThreshold = maxOf(18f, preset.bufferTargetMs * 0.50f)
+                val microLagThreshold = maxOf(3f, preset.bufferTargetMs * 0.15f)
+                val microLeadThreshold = -maxOf(2f, preset.bufferTargetMs * 0.12f)
+                val severeLeadThreshold = -maxOf(6f, preset.bufferTargetMs * 0.30f)
 
                 when {
                     // Severe Lag: flush AudioTrack and write immediately to eliminate accumulated delay

@@ -471,6 +471,68 @@ fun MasterScreen(
                 }
             }
 
+            // Type-C Cinema Mode Tip Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (selectedPreset == StreamQualityPreset.TYPE_C_WIRE) CyanAccent else DarkCardBorder)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Movie Lip-Sync (Type-C Cable)",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                            StatusBadge(
+                                text = if (selectedPreset == StreamQualityPreset.TYPE_C_WIRE) "15ms Active" else "Zero-Lag",
+                                state = if (selectedPreset == StreamQualityPreset.TYPE_C_WIRE) BadgeState.EXCELLENT else BadgeState.GOOD
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Watching movies or gaming? Connect a Type-C cable, turn on USB Tethering, and switch Latency Profile to 'Type-C Cable (15ms)' for instant zero-lag dialogue lip-sync.",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.setQualityPreset(StreamQualityPreset.TYPE_C_WIRE)
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent),
+                                modifier = Modifier.weight(1f).height(40.dp)
+                            ) {
+                                Text("Switch to 15ms Wire", color = CyanAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    NetworkUtils.openTetheringSettings(context)
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, TextSecondary.copy(alpha = 0.5f)),
+                                modifier = Modifier.height(40.dp)
+                            ) {
+                                Text("USB Settings", color = TextSecondary, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Connected Receivers Header
             item {
                 Row(

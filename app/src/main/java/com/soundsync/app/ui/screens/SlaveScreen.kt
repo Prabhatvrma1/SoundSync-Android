@@ -65,8 +65,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soundsync.app.data.model.StreamQualityPreset
 import com.soundsync.app.network.ControlClient
 import com.soundsync.app.network.DiscoveredMaster
+import com.soundsync.app.network.NetworkUtils
 import com.soundsync.app.ui.components.AudioVisualizer
 import com.soundsync.app.ui.components.BadgeState
 import com.soundsync.app.ui.components.StatusBadge
@@ -116,7 +118,10 @@ fun SlaveScreen(
     var manualIpInput by remember { mutableStateOf("") }
     var manualPinInput by remember { mutableStateOf("7294") }
     var showManualConnect by remember { mutableStateOf(false) }
-    val gatewayIp = remember { com.soundsync.app.network.NetworkUtils.getGatewayIp(context) }
+    var gatewayIp by remember { mutableStateOf(NetworkUtils.getActiveGatewayIp(context)) }
+    var usbGatewayIp by remember { mutableStateOf(NetworkUtils.getUsbGatewayIp(context)) }
+    var isUsbActive by remember { mutableStateOf(NetworkUtils.isUsbTetheringActive()) }
+    var usbDetails by remember { mutableStateOf(NetworkUtils.getUsbInterfaceDetails()) }
 
     val scanLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         com.journeyapps.barcodescanner.ScanContract()
@@ -131,6 +136,18 @@ fun SlaveScreen(
 
     LaunchedEffect(Unit) {
         viewModel.startDiscoveringMasters()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val gw = NetworkUtils.getActiveGatewayIp(context)
+            val usbGw = NetworkUtils.getUsbGatewayIp(context)
+            val usbOn = NetworkUtils.isUsbTetheringActive()
+            val details = NetworkUtils.getUsbInterfaceDetails()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                gatewayIp = gw
+                usbGatewayIp = usbGw
+                isUsbActive = usbOn
+                usbDetails = details
+            }
+        }
     }
 
     if (showDisconnectConfirmDialog) {
@@ -419,16 +436,20 @@ fun SlaveScreen(
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Micro-adjust if phone speaker DAC latency differs from Leader",
+                                    text = when {
+                                        syncCalibrationOffset < -5f -> "Audio shifted earlier (compensates video display & movie lip delay)"
+                                        syncCalibrationOffset > 5f -> "Audio delayed slightly"
+                                        else -> "Neutral real-time synchronization"
+                                    },
                                     fontSize = 11.sp,
-                                    color = TextSecondary
+                                    color = if (syncCalibrationOffset < -5f) CyanAccent else TextSecondary
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Slider(
                                     value = syncCalibrationOffset,
                                     onValueChange = { viewModel.setSyncCalibrationOffset(it) },
-                                    valueRange = -100f..100f,
-                                    steps = 39,
+                                    valueRange = -150f..150f,
+                                    steps = 300,
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = SliderDefaults.colors(
                                         thumbColor = CyanAccent,
@@ -441,11 +462,70 @@ fun SlaveScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("-100ms", fontSize = 11.sp, color = TextMuted)
+                                    Text("-150ms", fontSize = 11.sp, color = TextMuted)
                                     TextButton(onClick = { viewModel.setSyncCalibrationOffset(0f) }) {
-                                        Text("Reset to 0 ms", fontSize = 11.sp, color = CyanAccent)
+                                        Text("Reset (0 ms)", fontSize = 11.sp, color = CyanAccent)
                                     }
-                                    Text("+100ms", fontSize = 11.sp, color = TextMuted)
+                                    Text("+150ms", fontSize = 11.sp, color = TextMuted)
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Quick Movie Lip-Sync Compensations:",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextSecondary
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.setSyncCalibrationOffset(-30f) },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (syncCalibrationOffset.toInt() == -30) CyanAccent else DarkCardBorder)
+                                    ) {
+                                        Text("-30ms\nCinema", fontSize = 10.sp, color = if (syncCalibrationOffset.toInt() == -30) CyanAccent else TextPrimary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { viewModel.setSyncCalibrationOffset(-15f) },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (syncCalibrationOffset.toInt() == -15) CyanAccent else DarkCardBorder)
+                                    ) {
+                                        Text("-15ms\nLipLock", fontSize = 10.sp, color = if (syncCalibrationOffset.toInt() == -15) CyanAccent else TextPrimary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { viewModel.setSyncCalibrationOffset(0f) },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (syncCalibrationOffset.toInt() == 0) CyanAccent else DarkCardBorder)
+                                    ) {
+                                        Text("0ms\nDirect", fontSize = 10.sp, color = if (syncCalibrationOffset.toInt() == 0) CyanAccent else TextPrimary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { viewModel.setSyncCalibrationOffset(15f) },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (syncCalibrationOffset.toInt() == 15) CyanAccent else DarkCardBorder)
+                                    ) {
+                                        Text("+15ms\nLag+", fontSize = 10.sp, color = if (syncCalibrationOffset.toInt() == 15) CyanAccent else TextPrimary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { viewModel.setSyncCalibrationOffset(30f) },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (syncCalibrationOffset.toInt() == 30) CyanAccent else DarkCardBorder)
+                                    ) {
+                                        Text("+30ms\nLag++", fontSize = 10.sp, color = if (syncCalibrationOffset.toInt() == 30) CyanAccent else TextPrimary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
                                 }
                             }
                         }
@@ -582,7 +662,83 @@ fun SlaveScreen(
                         }
                     }
 
-                    // 2. Hotspot Direct Connect Card
+                    // 2. Type-C Cable Direct Connect Card (Cinema Zero-Lag / 15ms)
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isUsbActive) CyanAccent else DarkCardBorder)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Cast,
+                                            contentDescription = "Type-C Cable",
+                                            tint = CyanAccent,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Type-C Cable Direct",
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary,
+                                            fontSize = 15.sp
+                                        )
+                                    }
+                                    StatusBadge(
+                                        text = if (isUsbActive) "USB Cable Active" else "15ms Cinema Mode",
+                                        state = if (isUsbActive) BadgeState.EXCELLENT else BadgeState.GOOD
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = if (isUsbActive) {
+                                        "Connected via $usbDetails. Tap below for hardware 15ms wire speed with zero jitter."
+                                    } else {
+                                        "Connect phones with Type-C to Type-C cable and turn on USB Tethering on the Leader phone."
+                                    },
+                                    color = TextSecondary,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            viewModel.setQualityPreset(StreamQualityPreset.TYPE_C_WIRE)
+                                            viewModel.joinMasterDirect(usbGatewayIp, 8889, "7294", "Master (Type-C)")
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f).height(44.dp)
+                                    ) {
+                                        Text("Connect Type-C", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            NetworkUtils.openTetheringSettings(context)
+                                        },
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.height(44.dp)
+                                    ) {
+                                        Text("USB Settings", color = CyanAccent, fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Hotspot Direct Connect Card
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
