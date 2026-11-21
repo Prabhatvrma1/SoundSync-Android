@@ -52,6 +52,8 @@ class AudioStreamService : Service() {
         const val ACTION_STOP = "com.soundsync.app.ACTION_STOP"
         const val ACTION_PLAY = "com.soundsync.app.ACTION_PLAY"
         const val ACTION_PAUSE = "com.soundsync.app.ACTION_PAUSE"
+        const val ACTION_START_MASTER = "com.soundsync.app.ACTION_START_MASTER"
+        const val ACTION_START_SLAVE = "com.soundsync.app.ACTION_START_SLAVE"
 
         var instance: AudioStreamService? = null
             private set
@@ -94,7 +96,9 @@ class AudioStreamService : Service() {
         syncEngine = SyncEngine(clockSynchronizer, player)
         discoveryManager = DiscoveryManager(applicationContext)
         createNotificationChannel()
-        acquireLocks()
+        serviceScope.launch(Dispatchers.IO) {
+            acquireLocks()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -104,6 +108,17 @@ class AudioStreamService : Service() {
             ACTION_STOP -> stopAll()
             ACTION_PLAY -> resumePlayback()
             ACTION_PAUSE -> pausePlayback()
+            ACTION_START_MASTER -> {
+                val name = intent.getStringExtra("DEVICE_NAME") ?: "Master Phone"
+                val pin = intent.getStringExtra("PIN")
+                startAsMaster(name, pin)
+            }
+            ACTION_START_SLAVE -> {
+                val name = intent.getStringExtra("DEVICE_NAME") ?: "Receiver Phone"
+                val masterIp = intent.getStringExtra("MASTER_IP") ?: "127.0.0.1"
+                val pin = intent.getStringExtra("PIN")
+                startAsSlave(name, masterIp, pin)
+            }
         }
         return START_NOT_STICKY
     }
@@ -114,7 +129,7 @@ class AudioStreamService : Service() {
         preset: StreamQualityPreset = StreamQualityPreset.BALANCED
     ) {
         _currentRole.value = DeviceRole.MASTER
-        startForegroundServiceNotification("SoundSync Master - Ready", "Broadcasting presence...")
+        startForegroundServiceNotification("SoundSync Master - Ready", "Broadcasting presence...", withMediaProjection = false)
 
         audioSender.start()
 
@@ -152,8 +167,10 @@ class AudioStreamService : Service() {
     fun startMasterStreaming(preset: StreamQualityPreset = StreamQualityPreset.BALANCED) {
         val proj = activeMediaProjection
         if (proj != null) {
+            startForegroundServiceNotification("SoundSync Master - Streaming", "Streaming system audio", withMediaProjection = true)
             captureManager.startSystemAudioCapture(proj, preset, serviceScope)
         } else {
+            startForegroundServiceNotification("SoundSync Master - Test Pulses", "Emitting 1kHz sync pulses", withMediaProjection = false)
             captureManager.startTestPulseOnly(preset, serviceScope)
         }
 
@@ -179,7 +196,7 @@ class AudioStreamService : Service() {
 
     fun startAsSlave(slaveName: String, masterIp: String, pin: String?) {
         _currentRole.value = DeviceRole.SLAVE
-        startForegroundServiceNotification("SoundSync Receiver", "Connecting to master...")
+        startForegroundServiceNotification("SoundSync Receiver", "Connecting to master...", withMediaProjection = false)
 
         audioReceiver = AudioUdpReceiver { packet ->
             syncEngine.onPacketReceived(packet)
@@ -199,22 +216,32 @@ class AudioStreamService : Service() {
         _isStreaming.value = true
     }
 
-    private fun startForegroundServiceNotification(title: String, text: String) {
+    private fun startForegroundServiceNotification(title: String, text: String, withMediaProjection: Boolean = false) {
         val notification = buildNotification(title, text)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            }
-            try {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val type = if (withMediaProjection && activeMediaProjection != null) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                }
                 startForeground(NOTIFICATION_ID, notification, type)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error starting foreground with type", e)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val type = if (withMediaProjection && activeMediaProjection != null) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                } else {
+                    0
+                }
+                if (type != 0) {
+                    startForeground(NOTIFICATION_ID, notification, type)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to startForeground notification", e)
         }
     }
 

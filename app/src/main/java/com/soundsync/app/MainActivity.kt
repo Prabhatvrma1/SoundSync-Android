@@ -55,7 +55,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        startAudioService()
         checkAndRequestPermissions()
 
         setContent {
@@ -75,10 +74,10 @@ class MainActivity : ComponentActivity() {
 
     private fun startAudioService() {
         val intent = Intent(this, AudioStreamService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
+        try {
             startService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 

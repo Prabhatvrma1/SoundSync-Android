@@ -34,11 +34,13 @@ class DiscoveryManager(private val context: Context) {
 
     companion object {
         private const val TAG = "DiscoveryManager"
-        const val SERVICE_TYPE = "_soundsync._tcp."
+        const val SERVICE_TYPE = "_soundsync._tcp"
         const val BEACON_PORT = 8888
     }
 
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
+    private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+    private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
     private val gson = Gson()
 
     private val _discoveredMasters = MutableStateFlow<List<DiscoveredMaster>>(emptyList())
@@ -112,7 +114,9 @@ class DiscoveryManager(private val context: Context) {
                     delay(1500)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "UDP Beacon broadcast error", e)
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    Log.e(TAG, "UDP Beacon broadcast error", e)
+                }
             } finally {
                 socket?.close()
             }
@@ -134,6 +138,17 @@ class DiscoveryManager(private val context: Context) {
         stopDiscovery()
         masterMap.clear()
         _discoveredMasters.value = emptyList()
+
+        try {
+            if (multicastLock == null) {
+                multicastLock = wifiManager?.createMulticastLock("SoundSyncMulticastLock")?.apply {
+                    setReferenceCounted(true)
+                }
+            }
+            multicastLock?.acquire()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error acquiring MulticastLock", e)
+        }
 
         // 1. Listen for UDP Beacons
         beaconListenJob = scope.launch(Dispatchers.IO) {
@@ -158,7 +173,9 @@ class DiscoveryManager(private val context: Context) {
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "UDP Beacon listen error", e)
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    Log.e(TAG, "UDP Beacon listen error", e)
+                }
             } finally {
                 socket?.close()
             }
@@ -184,6 +201,13 @@ class DiscoveryManager(private val context: Context) {
     fun stopDiscovery() {
         beaconListenJob?.cancel()
         beaconListenJob = null
+        try {
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing MulticastLock", e)
+        }
         masterMap.clear()
         _discoveredMasters.value = emptyList()
     }

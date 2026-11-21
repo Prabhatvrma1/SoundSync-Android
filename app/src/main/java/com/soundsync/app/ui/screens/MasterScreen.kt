@@ -93,7 +93,16 @@ fun MasterScreen(
 
     var showPairingDialogState by remember { mutableStateOf(false) }
     var presetMenuExpanded by remember { mutableStateOf(false) }
-    val localIp = remember { NetworkUtils.getLocalIpAddress() ?: "Wi-Fi" }
+    var localIp by remember { mutableStateOf("Wi-Fi") }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val ip = NetworkUtils.getLocalIpAddress() ?: "Wi-Fi"
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                localIp = ip
+            }
+        }
+    }
 
     if (showPairingDialogState) {
         PairingDialog(pin = masterPin, onDismiss = { showPairingDialogState = false })

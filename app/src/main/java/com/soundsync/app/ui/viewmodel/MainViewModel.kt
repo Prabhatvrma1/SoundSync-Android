@@ -85,9 +85,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startMaster(mediaProjection: MediaProjection? = null) {
-        val svc = AudioStreamService.instance ?: return
-        svc.activeMediaProjection = mediaProjection
-        svc.startAsMaster(_deviceName.value, _masterPin.value, _selectedPreset.value)
+        val app = getApplication<Application>()
+        val intent = android.content.Intent(app, AudioStreamService::class.java).apply {
+            action = AudioStreamService.ACTION_START_MASTER
+            putExtra("DEVICE_NAME", _deviceName.value)
+            putExtra("PIN", _masterPin.value)
+        }
+        try {
+            app.startService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        AudioStreamService.instance?.let { svc ->
+            svc.activeMediaProjection = mediaProjection
+        }
     }
 
     fun startMasterStreaming() {
@@ -100,12 +111,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startDiscoveringMasters() {
+        val app = getApplication<Application>()
+        if (AudioStreamService.instance == null) {
+            try {
+                val intent = android.content.Intent(app, AudioStreamService::class.java)
+                app.startService(intent)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
         AudioStreamService.instance?.discoveryManager?.startDiscovery(viewModelScope)
     }
 
     fun joinMaster(master: DiscoveredMaster, pin: String? = null) {
-        val svc = AudioStreamService.instance ?: return
-        svc.startAsSlave(_deviceName.value, master.ipAddress, pin)
+        val app = getApplication<Application>()
+        val intent = android.content.Intent(app, AudioStreamService::class.java).apply {
+            action = AudioStreamService.ACTION_START_SLAVE
+            putExtra("DEVICE_NAME", _deviceName.value)
+            putExtra("MASTER_IP", master.ipAddress)
+            putExtra("PIN", pin)
+        }
+        try {
+            app.startService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     fun setSlaveVolume(slaveId: String, volume: Float) {
@@ -133,6 +163,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopEverything() {
+        val app = getApplication<Application>()
+        val intent = android.content.Intent(app, AudioStreamService::class.java).apply {
+            action = AudioStreamService.ACTION_STOP
+        }
+        try {
+            app.startService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         AudioStreamService.instance?.stopAll()
         _isTestToneActive.value = false
     }
