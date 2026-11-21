@@ -7,26 +7,33 @@ enum class StreamQualityPreset(
     val bufferTargetMs: Int,
     val description: String
 ) {
-    LOW_LATENCY(
-        title = "Low Latency",
+    ULTRA_LOW(
+        title = "Ultra Low (Hotspot/Gaming)",
         sampleRate = 48000,
-        frameDurationMs = 20,
-        bufferTargetMs = 120,
-        description = "Optimized for minimal delay (fast Wi-Fi, games, video)"
+        frameDurationMs = 10,
+        bufferTargetMs = 40,
+        description = "Minimal 40ms delay — ideal for phone hotspot, video sync & gaming"
+    ),
+    LOW_LATENCY(
+        title = "Low Latency (Fast Wi-Fi)",
+        sampleRate = 48000,
+        frameDurationMs = 15,
+        bufferTargetMs = 75,
+        description = "75ms buffer — balanced low latency for responsive audio"
     ),
     BALANCED(
         title = "Balanced",
         sampleRate = 48000,
-        frameDurationMs = 25,
-        bufferTargetMs = 200,
-        description = "Optimal balance of stability, latency and quality"
+        frameDurationMs = 20,
+        bufferTargetMs = 140,
+        description = "140ms buffer — optimal stability for music and normal Wi-Fi"
     ),
     HIGH_QUALITY(
         title = "High Quality",
         sampleRate = 48000,
-        frameDurationMs = 40,
-        bufferTargetMs = 350,
-        description = "Deep jitter buffer for congested Wi-Fi networks"
+        frameDurationMs = 30,
+        bufferTargetMs = 250,
+        description = "250ms buffer — deep jitter protection for weak or busy Wi-Fi"
     );
 
     val frameCountPerPacket: Int

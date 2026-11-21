@@ -48,8 +48,8 @@ class AudioTrackPlayer(
             val encoding = AudioFormat.ENCODING_PCM_16BIT
 
             val minBufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, encoding)
-            // Buffer size = ~100ms of audio for low latency
-            val targetBufferSize = maxOf(minBufferSize, (sampleRate * channels * 2 * 0.10).toInt())
+            // Ultra-low latency buffer size: 30ms of audio (eliminates 70ms of hardware lag)
+            val targetBufferSize = maxOf(minBufferSize, (sampleRate * channels * 2 * 0.03).toInt())
 
             val attributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)

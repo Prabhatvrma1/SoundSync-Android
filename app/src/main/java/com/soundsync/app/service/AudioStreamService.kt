@@ -90,6 +90,18 @@ class AudioStreamService : Service() {
     @Volatile
     var activeMediaProjection: MediaProjection? = null
 
+    var currentPreset: StreamQualityPreset = StreamStateHolder.currentPreset.value
+
+    fun setQualityPreset(preset: StreamQualityPreset) {
+        currentPreset = preset
+        StreamStateHolder.currentPreset.value = preset
+        val proj = activeMediaProjection
+        if (_isStreaming.value && proj != null) {
+            captureManager.startSystemAudioCapture(proj, preset, serviceScope)
+            controlServer?.broadcastStartStream(leadTimeMs = preset.bufferTargetMs, preset = preset)
+        }
+    }
+
     inner class LocalBinder : Binder() {
         fun getService(): AudioStreamService = this@AudioStreamService
     }
@@ -227,10 +239,10 @@ class AudioStreamService : Service() {
                 withMediaProjection = true
             )
 
-            captureManager.startSystemAudioCapture(projection, StreamQualityPreset.BALANCED, serviceScope)
+            captureManager.startSystemAudioCapture(projection, currentPreset, serviceScope)
             controlServer?.broadcastStartStream(
-                leadTimeMs = StreamQualityPreset.BALANCED.bufferTargetMs,
-                preset = StreamQualityPreset.BALANCED
+                leadTimeMs = currentPreset.bufferTargetMs,
+                preset = currentPreset
             )
             _isStreaming.value = true
             StreamStateHolder.isStreaming.value = true
@@ -250,7 +262,7 @@ class AudioStreamService : Service() {
         }
     }
 
-    fun startMasterStreaming(preset: StreamQualityPreset = StreamQualityPreset.BALANCED) {
+    fun startMasterStreaming(preset: StreamQualityPreset = currentPreset) {
         val proj = activeMediaProjection
         if (proj == null) {
             // No projection yet — user must tap "Start Sync Stream" to trigger the picker

@@ -106,7 +106,7 @@ class ControlClient(
                 StreamStateHolder.connectedMasterName.value = name
                 startNtpSync(scope)
                 startTelemetry(scope)
-                syncEngine.arm(scope)
+                syncEngine.arm(scope, StreamStateHolder.currentPreset.value)
             }
 
             ControlMessage.Type.HANDSHAKE_REJECT -> {

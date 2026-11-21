@@ -27,8 +27,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _masterPin = MutableStateFlow("7294")
     val masterPin: StateFlow<String> = _masterPin.asStateFlow()
 
-    private val _selectedPreset = MutableStateFlow(StreamQualityPreset.BALANCED)
-    val selectedPreset: StateFlow<StreamQualityPreset> = _selectedPreset.asStateFlow()
+    val selectedPreset: StateFlow<StreamQualityPreset> = StreamStateHolder.currentPreset.asStateFlow()
 
     val currentRole: StateFlow<DeviceRole> = StreamStateHolder.currentRole.asStateFlow()
 
@@ -65,7 +64,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setQualityPreset(preset: StreamQualityPreset) {
-        _selectedPreset.value = preset
+        StreamStateHolder.currentPreset.value = preset
+        AudioStreamService.instance?.setQualityPreset(preset)
     }
 
     fun toggleTestTone() {
@@ -75,7 +75,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (svc != null) {
             svc.captureManager.isTestToneEnabled = newActive
             if (newActive && !svc.isStreaming.value) {
-                svc.startMasterStreaming(_selectedPreset.value)
+                svc.startMasterStreaming(StreamStateHolder.currentPreset.value)
             }
         }
     }
@@ -99,7 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startMasterStreaming() {
         val svc = AudioStreamService.instance ?: return
-        svc.startMasterStreaming(_selectedPreset.value)
+        svc.startMasterStreaming(StreamStateHolder.currentPreset.value)
     }
 
     fun pauseMasterStreaming() {

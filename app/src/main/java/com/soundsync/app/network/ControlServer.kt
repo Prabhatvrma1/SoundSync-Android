@@ -215,10 +215,12 @@ class ControlServer(
 
                     // If Master is already streaming, inform the new slave immediately
                     if (StreamStateHolder.isStreaming.value) {
+                        val activePreset = StreamStateHolder.currentPreset.value
                         sendMessage(
                             ControlMessage(
                                 type = ControlMessage.Type.START_STREAM,
-                                scheduledStartMasterTimeNs = System.nanoTime() + 100_000_000L
+                                scheduledStartMasterTimeNs = System.nanoTime() + (activePreset.bufferTargetMs * 1_000_000L),
+                                preset = activePreset
                             )
                         )
                     }

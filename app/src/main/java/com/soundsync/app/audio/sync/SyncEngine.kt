@@ -52,9 +52,9 @@ class SyncEngine(
     /**
      * Arms the playback engine as soon as the slave connects and completes handshake.
      */
-    fun arm(scope: CoroutineScope) {
+    fun arm(scope: CoroutineScope, preset: StreamQualityPreset = StreamStateHolder.currentPreset.value) {
         if (isRunning.get()) return
-        startPlaybackLoop(scope, StreamQualityPreset.BALANCED)
+        startPlaybackLoop(scope, preset)
     }
 
     fun scheduleStart(
@@ -79,9 +79,10 @@ class SyncEngine(
                 delay(10)
             }
 
-            // Prime jitter buffer with at least 5 packets (50ms) before starting playout
+            // Prime jitter buffer: 2 packets for ultra low latency (20ms), 4 for higher presets
+            val minPrimePackets = if (preset.bufferTargetMs <= 75) 2 else 4
             var primeWaitAttempts = 0
-            while (jitterBuffer.size() < 5 && primeWaitAttempts < 100 && isActive && isRunning.get()) {
+            while (jitterBuffer.size() < minPrimePackets && primeWaitAttempts < 60 && isActive && isRunning.get()) {
                 delay(5)
                 primeWaitAttempts++
             }
@@ -122,31 +123,37 @@ class SyncEngine(
                 val timingErrorNs = estimatedSpeakerNs - targetPresentationNs
                 val timingErrorMs = timingErrorNs / 1_000_000f
 
+                // Dynamic PLL thresholds adapted to the selected latency profile
+                val flushLagThreshold = maxOf(35f, preset.bufferTargetMs * 0.50f)
+                val microLagThreshold = maxOf(6f, preset.bufferTargetMs * 0.12f)
+                val microLeadThreshold = -maxOf(4f, preset.bufferTargetMs * 0.10f)
+                val severeLeadThreshold = -maxOf(12f, preset.bufferTargetMs * 0.25f)
+
                 when {
-                    // Severe Lag (> 70ms late): flush AudioTrack and resume for immediate recovery
-                    timingErrorMs > 70f -> {
+                    // Severe Lag: flush AudioTrack and write immediately to eliminate accumulated delay
+                    timingErrorMs > flushLagThreshold -> {
                         player.flush()
                         player.writePcm(pcmBytes, 0)
                     }
 
-                    // Moderate Lag (10ms to 70ms late): speed up slightly (drop 1 micro-frame)
-                    timingErrorMs > 10f -> {
+                    // Moderate Lag: speed up slightly (drop 1 micro-frame)
+                    timingErrorMs > microLagThreshold -> {
                         player.writePcm(pcmBytes, -1)
                     }
 
-                    // Too early (> 15ms ahead): yield so hardware plays down buffer towards target
-                    timingErrorMs < -15f -> {
-                        val waitMs = (-timingErrorMs).toLong().coerceIn(1L, 15L)
+                    // Too early: yield so hardware plays down buffer towards target
+                    timingErrorMs < severeLeadThreshold -> {
+                        val waitMs = (-timingErrorMs).toLong().coerceIn(1L, 10L)
                         delay(waitMs)
                         player.writePcm(pcmBytes, 0)
                     }
 
-                    // Mild lead (-15ms to -5ms ahead): slow down slightly (duplicate 1 micro-frame)
-                    timingErrorMs < -5f -> {
+                    // Mild lead: slow down slightly (duplicate 1 micro-frame)
+                    timingErrorMs < microLeadThreshold -> {
                         player.writePcm(pcmBytes, 1)
                     }
 
-                    // Phase Locked (-5ms to +10ms): zero adjustment needed
+                    // Phase Locked: zero adjustment needed
                     else -> {
                         player.writePcm(pcmBytes, 0)
                     }

@@ -3,6 +3,7 @@ package com.soundsync.app.service
 import com.soundsync.app.audio.capture.AudioCaptureManager
 import com.soundsync.app.data.model.DeviceRole
 import com.soundsync.app.data.model.SlaveDevice
+import com.soundsync.app.data.model.StreamQualityPreset
 import com.soundsync.app.data.model.SyncMetrics
 import com.soundsync.app.network.ControlClient
 import com.soundsync.app.network.DiscoveredMaster
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 object StreamStateHolder {
     val currentRole = MutableStateFlow(DeviceRole.IDLE)
     val isStreaming = MutableStateFlow(false)
+    val currentPreset = MutableStateFlow(StreamQualityPreset.ULTRA_LOW)
     val slaveConnectionState = MutableStateFlow(ControlClient.ConnectionState.DISCONNECTED)
     val connectedMasterName = MutableStateFlow<String?>("Master Phone")
     val connectedSlaves = MutableStateFlow<List<SlaveDevice>>(emptyList())
