@@ -1,0 +1,216 @@
+package com.soundsync.app.network
+
+import android.util.Log
+import com.soundsync.app.audio.playback.AudioTrackPlayer
+import com.soundsync.app.audio.sync.ClockSynchronizer
+import com.soundsync.app.audio.sync.SyncEngine
+import com.soundsync.app.data.model.ControlMessage
+import com.soundsync.app.data.model.StreamQualityPreset
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.PrintWriter
+import java.net.Socket
+
+/**
+ * TCP Control Client on Slave phone.
+ * Connects to Master phone, runs NTP clock synchronization, and executes playback commands.
+ */
+class ControlClient(
+    val slaveId: String,
+    val slaveName: String,
+    val clockSynchronizer: ClockSynchronizer,
+    val syncEngine: SyncEngine,
+    val player: AudioTrackPlayer
+) {
+    companion object {
+        private const val TAG = "ControlClient"
+    }
+
+    enum class ConnectionState {
+        DISCONNECTED,
+        CONNECTING,
+        CONNECTED,
+        REJECTED,
+        ERROR
+    }
+
+    private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    private val _masterName = MutableStateFlow<String?>("Master")
+    val masterName: StateFlow<String?> = _masterName.asStateFlow()
+
+    private var socket: Socket? = null
+    private var reader: BufferedReader? = null
+    private var writer: PrintWriter? = null
+    private var listenJob: Job? = null
+    private var ntpJob: Job? = null
+    private var telemetryJob: Job? = null
+
+    fun connect(masterIp: String, port: Int = 8889, pin: String? = null, scope: CoroutineScope) {
+        disconnect()
+
+        _connectionState.value = ConnectionState.CONNECTING
+
+        listenJob = scope.launch(Dispatchers.IO) {
+            try {
+                val sock = Socket(masterIp, port)
+                socket = sock
+                reader = BufferedReader(InputStreamReader(sock.getInputStream()))
+                writer = PrintWriter(sock.getOutputStream(), true)
+
+                // Send Handshake
+                val handshake = ControlMessage(
+                    type = ControlMessage.Type.HANDSHAKE,
+                    slaveId = slaveId,
+                    slaveName = slaveName,
+                    pin = pin
+                )
+                writer?.println(handshake.toJson())
+
+                while (isActive) {
+                    val line = reader?.readLine() ?: break
+                    val msg = ControlMessage.fromJson(line) ?: continue
+                    handleMessage(msg, scope)
+                }
+            } catch (e: Exception) {
+                if (isActive) {
+                    Log.e(TAG, "Connection error to $masterIp", e)
+                    _connectionState.value = ConnectionState.ERROR
+                }
+            } finally {
+                disconnectInternal()
+            }
+        }
+    }
+
+    private fun handleMessage(msg: ControlMessage, scope: CoroutineScope) {
+        when (msg.type) {
+            ControlMessage.Type.HANDSHAKE_ACK -> {
+                _connectionState.value = ConnectionState.CONNECTED
+                _masterName.value = msg.masterName ?: "Master Phone"
+                startNtpSync(scope)
+                startTelemetry(scope)
+            }
+
+            ControlMessage.Type.HANDSHAKE_REJECT -> {
+                _connectionState.value = ConnectionState.REJECTED
+                disconnectInternal()
+            }
+
+            ControlMessage.Type.NTP_PONG -> {
+                val t0 = msg.originTimeNs ?: 0L
+                val t1 = msg.receiveTimeNs ?: 0L
+                val t2 = msg.transmitTimeNs ?: 0L
+                val t3 = System.nanoTime()
+                clockSynchronizer.addSample(t0, t1, t2, t3)
+            }
+
+            ControlMessage.Type.START_STREAM -> {
+                val startMasterTime = msg.scheduledStartMasterTimeNs ?: (System.nanoTime() + 200_000_000L)
+                val preset = msg.preset ?: StreamQualityPreset.BALANCED
+                syncEngine.scheduleStart(startMasterTime, preset, scope)
+            }
+
+            ControlMessage.Type.PAUSE_STREAM -> {
+                player.pause()
+            }
+
+            ControlMessage.Type.RESUME_STREAM -> {
+                player.play()
+            }
+
+            ControlMessage.Type.STOP_STREAM -> {
+                syncEngine.stop()
+            }
+
+            ControlMessage.Type.SET_VOLUME -> {
+                msg.volume?.let { player.volume = it }
+            }
+
+            ControlMessage.Type.SET_MUTE -> {
+                msg.isMuted?.let { player.isMuted = it }
+            }
+
+            else -> {}
+        }
+    }
+
+    private fun startNtpSync(scope: CoroutineScope) {
+        ntpJob?.cancel()
+        ntpJob = scope.launch(Dispatchers.IO) {
+            // Rapid burst of 10 pings at startup for fast convergence
+            repeat(10) {
+                sendPing()
+                delay(60)
+            }
+            // Periodic continuous synchronization ping every 1 second
+            while (isActive) {
+                sendPing()
+                delay(1000)
+            }
+        }
+    }
+
+    private fun sendPing() {
+        val t0 = System.nanoTime()
+        val ping = ControlMessage(type = ControlMessage.Type.NTP_PING, originTimeNs = t0)
+        writer?.println(ping.toJson())
+    }
+
+    private fun startTelemetry(scope: CoroutineScope) {
+        telemetryJob?.cancel()
+        telemetryJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                delay(2000)
+                val metrics = syncEngine.syncMetrics.value
+                val telemetry = ControlMessage(
+                    type = ControlMessage.Type.TELEMETRY,
+                    slaveId = slaveId,
+                    rttMs = metrics.rttMs,
+                    clockOffsetMs = metrics.clockOffsetMs,
+                    bufferHealthMs = metrics.bufferHealthMs,
+                    underruns = metrics.underrunCount,
+                    packetLossPct = metrics.packetLossPct
+                )
+                writer?.println(telemetry.toJson())
+            }
+        }
+    }
+
+    fun disconnect() {
+        disconnectInternal()
+    }
+
+    private fun disconnectInternal() {
+        ntpJob?.cancel()
+        ntpJob = null
+        telemetryJob?.cancel()
+        telemetryJob = null
+        listenJob?.cancel()
+        listenJob = null
+        syncEngine.stop()
+        clockSynchronizer.reset()
+
+        try {
+            reader?.close()
+            writer?.close()
+            socket?.close()
+        } catch (e: Exception) {
+            // ignore
+        }
+        socket = null
+        if (_connectionState.value != ConnectionState.REJECTED) {
+            _connectionState.value = ConnectionState.DISCONNECTED
+        }
+    }
+}

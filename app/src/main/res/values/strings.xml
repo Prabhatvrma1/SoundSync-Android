@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">SoundSync</string>
+    <string name="master_title">Master Speaker</string>
+    <string name="slave_title">Receiver Speaker</string>
+    <string name="create_group">Create Speaker Group</string>
+    <string name="join_group">Join Speaker Group</string>
+    <string name="stop_streaming">Stop Streaming</string>
+    <string name="start_sync">Start Synchronized Playback</string>
+    <string name="pause_sync">Pause Playback</string>
+    <string name="resume_sync">Resume Playback</string>
+    <string name="notification_channel_name">Audio Streaming</string>
+    <string name="notification_channel_desc">Active multi-device synchronized audio playback</string>
+</resources>
