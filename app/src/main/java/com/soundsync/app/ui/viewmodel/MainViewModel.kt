@@ -130,11 +130,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun joinMaster(master: DiscoveredMaster, pin: String? = null) {
+        joinMasterDirect(master.ipAddress, master.controlPort, pin, master.deviceName)
+    }
+
+    fun joinMasterDirect(ip: String, port: Int = 8889, pin: String? = null, masterName: String = "Master") {
         val app = getApplication<Application>()
         val intent = android.content.Intent(app, AudioStreamService::class.java).apply {
             action = AudioStreamService.ACTION_START_SLAVE
             putExtra("DEVICE_NAME", _deviceName.value)
-            putExtra("MASTER_IP", master.ipAddress)
+            putExtra("MASTER_IP", ip)
             putExtra("PIN", pin)
         }
         try {

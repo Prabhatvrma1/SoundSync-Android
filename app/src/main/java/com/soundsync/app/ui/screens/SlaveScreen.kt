@@ -20,6 +20,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VolumeMute
 import androidx.compose.material.icons.filled.VolumeUp
@@ -90,6 +93,23 @@ fun SlaveScreen(
     var selectedMasterForPin by remember { mutableStateOf<DiscoveredMaster?>(null) }
     var localVolume by remember { mutableFloatStateOf(1.0f) }
     var isLocalMuted by remember { mutableStateOf(false) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var manualIpInput by remember { mutableStateOf("") }
+    var manualPinInput by remember { mutableStateOf("7294") }
+    var showManualConnect by remember { mutableStateOf(false) }
+    val gatewayIp = remember { com.soundsync.app.network.NetworkUtils.getGatewayIp(context) }
+
+    val scanLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        com.journeyapps.barcodescanner.ScanContract()
+    ) { result ->
+        if (result.contents != null) {
+            val payload = com.soundsync.app.util.QrConnectionPayload.fromString(result.contents)
+            if (payload != null && payload.ip.isNotEmpty()) {
+                viewModel.joinMasterDirect(payload.ip, payload.port, payload.pin, payload.name)
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.startDiscoveringMasters()
@@ -331,8 +351,158 @@ fun SlaveScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    // 1. Scan Master QR Code Button
                     item {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = {
+                                val options = com.journeyapps.barcodescanner.ScanOptions().apply {
+                                    setPrompt("Point camera at Master Phone's QR Code")
+                                    setBeepEnabled(true)
+                                    setOrientationLocked(false)
+                                }
+                                scanLauncher.launch(options)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth().height(52.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.QrCodeScanner,
+                                contentDescription = "Scan QR",
+                                tint = DarkBackground
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Scan Master QR Code",
+                                color = DarkBackground,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // 2. Hotspot Direct Connect Card
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, PurpleAccent)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Hotspot Direct Connect",
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary,
+                                        fontSize = 15.sp
+                                    )
+                                    Text(
+                                        text = "Connected to phone hotspot? Connect directly to gateway ($gatewayIp).",
+                                        color = TextSecondary,
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Button(
+                                    onClick = {
+                                        viewModel.joinMasterDirect(gatewayIp, 8889, "7294", "Hotspot Master")
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Connect", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Manual IP & PIN Connect Toggle
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable { showManualConnect = !showManualConnect },
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (showManualConnect) "Hide Manual IP Connect" else "Enter Master IP Manually",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = CyanAccent
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Wifi,
+                                        contentDescription = "Manual IP",
+                                        tint = CyanAccent,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                if (showManualConnect) {
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    OutlinedTextField(
+                                        value = manualIpInput,
+                                        onValueChange = { manualIpInput = it.trim() },
+                                        label = { Text("Master IP Address (e.g. 192.168.43.1)") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = CyanAccent,
+                                            unfocusedBorderColor = DarkCardBorder,
+                                            focusedTextColor = TextPrimary,
+                                            unfocusedTextColor = TextPrimary
+                                        ),
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    OutlinedTextField(
+                                        value = manualPinInput,
+                                        onValueChange = { if (it.length <= 4) manualPinInput = it },
+                                        label = { Text("Pairing PIN (Default: 7294)") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = CyanAccent,
+                                            unfocusedBorderColor = DarkCardBorder,
+                                            focusedTextColor = TextPrimary,
+                                            unfocusedTextColor = TextPrimary
+                                        ),
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Button(
+                                        onClick = {
+                                            if (manualIpInput.isNotEmpty()) {
+                                                viewModel.joinMasterDirect(manualIpInput, 8889, manualPinInput, "Master")
+                                            }
+                                        },
+                                        enabled = manualIpInput.isNotEmpty(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth().height(46.dp)
+                                    ) {
+                                        Text("Connect to IP", color = DarkBackground, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "Nearby Master Speakers (${discoveredMasters.size})",
                             fontSize = 16.sp,

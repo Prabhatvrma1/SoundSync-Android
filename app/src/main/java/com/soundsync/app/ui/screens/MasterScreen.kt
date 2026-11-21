@@ -105,7 +105,12 @@ fun MasterScreen(
     }
 
     if (showPairingDialogState) {
-        PairingDialog(pin = masterPin, onDismiss = { showPairingDialogState = false })
+        PairingDialog(
+            pin = masterPin,
+            masterIp = localIp,
+            deviceName = deviceName,
+            onDismiss = { showPairingDialogState = false }
+        )
     }
 
     Scaffold(
@@ -193,6 +198,45 @@ fun MasterScreen(
                         Spacer(modifier = Modifier.height(14.dp))
 
                         AudioVisualizer(amplitude = amplitude, isStreaming = isStreaming)
+                    }
+                }
+            }
+
+            // QR Code Quick Access Card
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { showPairingDialogState = true },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Pair Receivers (QR Code)",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Tap to show connection QR Code, IP ($localIp), and PIN ($masterPin)",
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.QrCode,
+                            contentDescription = "Show QR",
+                            tint = CyanAccent,
+                            modifier = Modifier.size(32.dp)
+                        )
                     }
                 }
             }

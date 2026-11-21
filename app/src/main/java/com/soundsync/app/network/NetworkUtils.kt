@@ -41,4 +41,26 @@ object NetworkUtils {
         }
         return InetAddress.getByName("255.255.255.255")
     }
+
+    fun getGatewayIp(context: android.content.Context): String {
+        return try {
+            val wifiManager = context.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+            val dhcp = wifiManager?.dhcpInfo
+            if (dhcp != null && dhcp.gateway != 0) {
+                val ip = dhcp.gateway
+                String.format(
+                    java.util.Locale.US,
+                    "%d.%d.%d.%d",
+                    ip and 0xff,
+                    ip shr 8 and 0xff,
+                    ip shr 16 and 0xff,
+                    ip shr 24 and 0xff
+                )
+            } else {
+                "192.168.43.1"
+            }
+        } catch (e: Exception) {
+            "192.168.43.1"
+        }
+    }
 }
