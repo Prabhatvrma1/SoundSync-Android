@@ -134,12 +134,28 @@ class AudioTrackPlayer(
             bytesToWrite
         }
 
-        val written = track.write(scaledBytes, 0, scaledBytes.size, AudioTrack.WRITE_BLOCKING)
-        if (written > 0) {
-            val bytesPerFrame = channels * 2
-            totalFramesWritten += (written / bytesPerFrame)
+        // Use NON_BLOCKING to avoid stalling the playback coroutine
+        var offset = 0
+        var totalWritten = 0
+        var retries = 0
+        while (offset < scaledBytes.size && retries < 20) {
+            val written = track.write(scaledBytes, offset, scaledBytes.size - offset, AudioTrack.WRITE_NON_BLOCKING)
+            if (written > 0) {
+                offset += written
+                totalWritten += written
+            } else if (written == 0) {
+                // Buffer full — sleep 1ms and retry
+                Thread.sleep(1)
+                retries++
+            } else {
+                break // error
+            }
         }
-        return written
+        if (totalWritten > 0) {
+            val bytesPerFrame = channels * 2
+            totalFramesWritten += (totalWritten / bytesPerFrame)
+        }
+        return totalWritten
     }
 
     fun getPlaybackHeadPositionFrames(): Long {

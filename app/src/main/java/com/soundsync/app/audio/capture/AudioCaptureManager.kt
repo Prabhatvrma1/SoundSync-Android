@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
+import android.media.AudioTimestamp
 import android.media.projection.MediaProjection
 import android.os.Process
 import android.util.Log
@@ -113,10 +114,11 @@ class AudioCaptureManager {
                     .build()
 
                 if (record.state != AudioRecord.STATE_INITIALIZED) {
-                    Log.w(TAG, "AudioRecord not initialized, falling back to sync pulses")
-                    _captureState.value = CaptureState.RESTRICTED
-                    _statusMessage.value = "Audio capture restricted; emitting sync test pulses"
-                    startTestPulseOnly(preset, scope)
+                    Log.e(TAG, "AudioRecord not initialized — cannot capture audio. Stopping.")
+                    _captureState.value = CaptureState.ERROR
+                    _statusMessage.value = "Audio capture failed to initialize. Try granting screen capture permission."
+                    StreamStateHolder.captureState.value = CaptureState.ERROR
+                    StreamStateHolder.captureMessage.value = "Capture failed — no fallback"
                     return@launch
                 }
 
@@ -159,7 +161,13 @@ class AudioCaptureManager {
                     }
 
                     if (bytesReadTotal == chunkByteSize) {
-                        val masterTimeNs = System.nanoTime()
+                        // Use AudioTimestamp for precise capture time (timestamp of START of buffer)
+                        val audioTimestamp = AudioTimestamp()
+                        val masterTimeNs: Long = if (record.getTimestamp(audioTimestamp, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS) {
+                            audioTimestamp.nanoTime
+                        } else {
+                            System.nanoTime()
+                        }
                         calculateRms(buffer)
                         emitPacket(buffer, chunkFrameCount, sampleRate, 2, masterTimeNs)
                     }
@@ -167,13 +175,15 @@ class AudioCaptureManager {
             } catch (e: SecurityException) {
                 Log.e(TAG, "SecurityException starting audio capture", e)
                 _captureState.value = CaptureState.RESTRICTED
-                _statusMessage.value = "Capture restricted: ${e.localizedMessage}"
-                startTestPulseOnly(preset, scope)
+                _statusMessage.value = "Capture blocked by OS: ${e.localizedMessage}"
+                StreamStateHolder.captureState.value = CaptureState.RESTRICTED
+                StreamStateHolder.captureMessage.value = "Capture blocked — check permissions"
             } catch (e: Exception) {
                 Log.e(TAG, "Exception during audio capture", e)
                 _captureState.value = CaptureState.ERROR
-                _statusMessage.value = "Audio capture fallback: ${e.localizedMessage}"
-                startTestPulseOnly(preset, scope)
+                _statusMessage.value = "Audio capture error: ${e.localizedMessage}"
+                StreamStateHolder.captureState.value = CaptureState.ERROR
+                StreamStateHolder.captureMessage.value = "Capture error — no fallback"
             } finally {
                 cleanUpRecord()
             }

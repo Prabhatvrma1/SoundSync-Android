@@ -183,54 +183,96 @@ class AudioStreamService : Service() {
 
     fun handleStartProjection(resultCode: Int, resultData: Intent) {
         try {
-            startForegroundServiceNotification("SoundSync Master - Streaming", "Streaming system audio", withMediaProjection = true)
-
             val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? android.media.projection.MediaProjectionManager
             val projection = projectionManager?.getMediaProjection(resultCode, resultData)
 
-            if (projection != null) {
-                projection.registerCallback(object : MediaProjection.Callback() {
-                    override fun onStop() {
-                        Log.d(TAG, "MediaProjection stopped by system")
-                        activeMediaProjection = null
-                        captureManager.stopCapture()
-                        _isStreaming.value = false
-                        updateNotification()
-                    }
-                }, android.os.Handler(android.os.Looper.getMainLooper()))
-
-                activeMediaProjection = projection
-                captureManager.startSystemAudioCapture(projection, StreamQualityPreset.BALANCED, serviceScope)
-            } else {
-                captureManager.startTestPulseOnly(StreamQualityPreset.BALANCED, serviceScope)
+            if (projection == null) {
+                // Projection denied or failed — do NOT fall back to test pulses
+                Log.e(TAG, "MediaProjection is null — capture permission denied or failed")
+                startForegroundServiceNotification(
+                    "SoundSync – Capture Failed",
+                    "Screen capture denied. Tap to retry.",
+                    withMediaProjection = false
+                )
+                _isStreaming.value = false
+                StreamStateHolder.isStreaming.value = false
+                updateNotification()
+                return
             }
 
-            controlServer?.broadcastStartStream(leadTimeMs = StreamQualityPreset.BALANCED.bufferTargetMs, preset = StreamQualityPreset.BALANCED)
+            projection.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.d(TAG, "MediaProjection stopped by system")
+                    activeMediaProjection = null
+                    captureManager.stopCapture()
+                    _isStreaming.value = false
+                    StreamStateHolder.isStreaming.value = false
+                    updateNotification()
+                }
+            }, android.os.Handler(android.os.Looper.getMainLooper()))
+
+            activeMediaProjection = projection
+
+            startForegroundServiceNotification(
+                "SoundSync Master – Streaming",
+                "Capturing & streaming system audio",
+                withMediaProjection = true
+            )
+
+            captureManager.startSystemAudioCapture(projection, StreamQualityPreset.BALANCED, serviceScope)
+            controlServer?.broadcastStartStream(
+                leadTimeMs = StreamQualityPreset.BALANCED.bufferTargetMs,
+                preset = StreamQualityPreset.BALANCED
+            )
             _isStreaming.value = true
+            StreamStateHolder.isStreaming.value = true
             updateNotification()
+
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start MediaProjection in service", e)
-            captureManager.startTestPulseOnly(StreamQualityPreset.BALANCED, serviceScope)
-            _isStreaming.value = true
+            // On error do NOT stream noise — show error notification
+            startForegroundServiceNotification(
+                "SoundSync – Error",
+                "Capture error: ${e.message}",
+                withMediaProjection = false
+            )
+            _isStreaming.value = false
+            StreamStateHolder.isStreaming.value = false
             updateNotification()
         }
     }
 
     fun startMasterStreaming(preset: StreamQualityPreset = StreamQualityPreset.BALANCED) {
         val proj = activeMediaProjection
-        if (proj != null) {
-            startForegroundServiceNotification("SoundSync Master - Streaming", "Streaming system audio", withMediaProjection = true)
-            player.pause()
-            captureManager.startSystemAudioCapture(proj, preset, serviceScope)
-        } else {
-            startForegroundServiceNotification("SoundSync Master - Test Pulses", "Emitting 1kHz sync pulses", withMediaProjection = false)
-            player.initialize()
-            player.play()
-            captureManager.startTestPulseOnly(preset, serviceScope, onPulseGenerated = { pcm ->
-                player.writePcm(pcm, 0)
-            })
+        if (proj == null) {
+            // No projection yet — user must tap "Start Sync Stream" to trigger the picker
+            Log.w(TAG, "startMasterStreaming called with no active MediaProjection — ignoring")
+            return
         }
+        startForegroundServiceNotification(
+            "SoundSync Master – Streaming",
+            "Capturing & streaming system audio",
+            withMediaProjection = true
+        )
+        captureManager.startSystemAudioCapture(proj, preset, serviceScope)
+        controlServer?.broadcastStartStream(leadTimeMs = preset.bufferTargetMs, preset = preset)
+        _isStreaming.value = true
+        StreamStateHolder.isStreaming.value = true
+        updateNotification()
+    }
 
+    /** Explicit test-tone mode — ONLY called from a manual UI toggle, never automatically. */
+    fun startTestToneStreaming(preset: StreamQualityPreset = StreamQualityPreset.BALANCED) {
+        startForegroundServiceNotification(
+            "SoundSync Master – Test Tone",
+            "Emitting 1kHz sync pulses (test mode)",
+            withMediaProjection = false
+        )
+        player.initialize()
+        player.play()
+        captureManager.startTestPulseOnly(preset, serviceScope, onPulseGenerated = { pcm ->
+            player.writePcm(pcm, 0)
+        })
         controlServer?.broadcastStartStream(leadTimeMs = preset.bufferTargetMs, preset = preset)
         _isStreaming.value = true
         StreamStateHolder.isStreaming.value = true
@@ -248,7 +290,11 @@ class AudioStreamService : Service() {
 
     fun resumePlayback() {
         if (_currentRole.value == DeviceRole.MASTER) {
-            startMasterStreaming()
+            val proj = activeMediaProjection
+            if (proj != null) {
+                startMasterStreaming()
+            }
+            // If no projection, do nothing — user must re-grant screen capture
         }
     }
 

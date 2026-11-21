@@ -73,16 +73,15 @@ class SyncEngine(
         player.play()
 
         playbackJob = scope.launch(Dispatchers.Default) {
-            // Wait for initial clock synchronization (up to 300ms)
-            var syncWaitAttempts = 0
-            while (!clockSynchronizer.isSynchronized && syncWaitAttempts < 30 && isActive && isRunning.get()) {
+            // Wait for clock synchronization — no fixed limit, wait until actually synced
+            // This ensures we never play with an incorrect clock offset
+            while (!clockSynchronizer.isSynchronized && isActive && isRunning.get()) {
                 delay(10)
-                syncWaitAttempts++
             }
 
-            // Prime jitter buffer with at least 3 packets (30ms) before starting playout
+            // Prime jitter buffer with at least 5 packets (50ms) before starting playout
             var primeWaitAttempts = 0
-            while (jitterBuffer.size() < 3 && primeWaitAttempts < 50 && isActive && isRunning.get()) {
+            while (jitterBuffer.size() < 5 && primeWaitAttempts < 100 && isActive && isRunning.get()) {
                 delay(5)
                 primeWaitAttempts++
             }
