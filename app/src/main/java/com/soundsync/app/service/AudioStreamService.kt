@@ -341,6 +341,18 @@ class AudioStreamService : Service() {
         client.connect(masterIp = masterIp, pin = pin, scope = serviceScope)
         _isStreaming.value = true
         StreamStateHolder.isStreaming.value = true
+
+        try {
+            audioManager = getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+            @Suppress("DEPRECATION")
+            audioManager?.requestAudioFocus(
+                audioFocusChangeListener,
+                android.media.AudioManager.STREAM_MUSIC,
+                android.media.AudioManager.AUDIOFOCUS_GAIN
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Audio focus request skipped", e)
+        }
     }
 
     private fun startForegroundServiceNotification(title: String, text: String, withMediaProjection: Boolean = false) {
@@ -428,6 +440,13 @@ class AudioStreamService : Service() {
         discoveryManager.stopAdvertising()
         discoveryManager.stopDiscovery()
 
+        try {
+            @Suppress("DEPRECATION")
+            audioManager?.abandonAudioFocus(audioFocusChangeListener)
+        } catch (e: Exception) {
+            // ignore
+        }
+
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -467,6 +486,35 @@ class AudioStreamService : Service() {
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
+        }
+    }
+
+    private var audioManager: android.media.AudioManager? = null
+    private val audioFocusChangeListener = android.media.AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            android.media.AudioManager.AUDIOFOCUS_LOSS,
+            android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                // Incoming phone call or navigation prompt — pause temporarily to avoid echo/interruption
+                player.pause()
+            }
+            android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                player.volume = 0.25f
+            }
+            android.media.AudioManager.AUDIOFOCUS_GAIN -> {
+                player.volume = 1.0f
+                if (_isStreaming.value) {
+                    player.play()
+                }
+            }
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // Human behavior: If user swipes app from Recents while NOT streaming, cleanly release all locks and stop
+        // If actively streaming, keep foreground service running with ongoing notification
+        if (!_isStreaming.value) {
+            stopAll()
         }
     }
 

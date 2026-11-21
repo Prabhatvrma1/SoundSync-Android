@@ -99,8 +99,15 @@ fun MasterScreen(
     var presetMenuExpanded by remember { mutableStateOf(false) }
     var localIp by remember { mutableStateOf("Wi-Fi") }
     var showStopConfirmDialog by remember { mutableStateOf(false) }
+    var isLaunchingCapture by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = context as? Activity
+
+    androidx.compose.runtime.LaunchedEffect(isStreaming) {
+        if (isStreaming) {
+            isLaunchingCapture = false
+        }
+    }
 
     BackHandler(enabled = true) {
         if (isStreaming || connectedSlaves.isNotEmpty()) {
@@ -375,7 +382,13 @@ fun MasterScreen(
                         ) {
                             if (!isStreaming) {
                                 Button(
-                                    onClick = onRequestMediaProjection,
+                                    onClick = {
+                                        if (!isLaunchingCapture && !isStreaming) {
+                                            isLaunchingCapture = true
+                                            onRequestMediaProjection()
+                                        }
+                                    },
+                                    enabled = !isLaunchingCapture,
                                     colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
                                     shape = RoundedCornerShape(14.dp),
                                     modifier = Modifier.weight(1f).height(50.dp)
@@ -387,7 +400,7 @@ fun MasterScreen(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Start Sync Stream",
+                                        text = if (isLaunchingCapture) "Requesting Capture..." else "Start Sync Stream",
                                         color = DarkBackground,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 15.sp

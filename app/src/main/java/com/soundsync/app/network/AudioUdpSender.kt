@@ -31,14 +31,22 @@ class AudioUdpSender(val port: Int = 8890) {
     }
 
     fun addReceiver(ip: String, port: Int = 8890) {
-        val address = InetSocketAddress(ip, port)
-        if (!slaveEndpoints.contains(address)) {
-            slaveEndpoints.add(address)
+        try {
+            val address = InetSocketAddress(ip, port)
+            if (!slaveEndpoints.contains(address)) {
+                slaveEndpoints.add(address)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Invalid receiver address $ip:$port", e)
         }
     }
 
     fun removeReceiver(ip: String) {
-        slaveEndpoints.removeIf { it.address.hostAddress == ip }
+        try {
+            slaveEndpoints.removeIf { it.address?.hostAddress == ip || it.hostString == ip }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error removing receiver $ip", e)
+        }
     }
 
     fun clearReceivers() {

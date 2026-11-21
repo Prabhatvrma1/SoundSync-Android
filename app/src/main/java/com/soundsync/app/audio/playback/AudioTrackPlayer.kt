@@ -121,45 +121,54 @@ class AudioTrackPlayer(
         val track = audioTrack ?: return 0
         if (!isPlaying.get()) return 0
 
-        val bytesToWrite = if (adjustment == 0) {
-            pcmBytes
-        } else {
-            applyDriftAdjustment(pcmBytes, adjustment)
-        }
-
-        // Apply software volume scaling if needed
-        val scaledBytes = if (isMuted || volume < 0.99f) {
-            scaleVolume(bytesToWrite, if (isMuted) 0f else volume)
-        } else {
-            bytesToWrite
-        }
-
-        // Use NON_BLOCKING to avoid stalling the playback coroutine
-        var offset = 0
-        var totalWritten = 0
-        var retries = 0
-        while (offset < scaledBytes.size && retries < 20) {
-            val written = track.write(scaledBytes, offset, scaledBytes.size - offset, AudioTrack.WRITE_NON_BLOCKING)
-            if (written > 0) {
-                offset += written
-                totalWritten += written
-            } else if (written == 0) {
-                // Buffer full — sleep 1ms and retry
-                Thread.sleep(1)
-                retries++
+        return try {
+            val bytesToWrite = if (adjustment == 0) {
+                pcmBytes
             } else {
-                break // error
+                applyDriftAdjustment(pcmBytes, adjustment)
             }
+
+            // Apply software volume scaling if needed
+            val scaledBytes = if (isMuted || volume < 0.99f) {
+                scaleVolume(bytesToWrite, if (isMuted) 0f else volume)
+            } else {
+                bytesToWrite
+            }
+
+            // Use NON_BLOCKING to avoid stalling the playback coroutine
+            var offset = 0
+            var totalWritten = 0
+            var retries = 0
+            while (offset < scaledBytes.size && retries < 20 && isPlaying.get()) {
+                val written = track.write(scaledBytes, offset, scaledBytes.size - offset, AudioTrack.WRITE_NON_BLOCKING)
+                if (written > 0) {
+                    offset += written
+                    totalWritten += written
+                } else if (written == 0) {
+                    // Buffer full — sleep 1ms and retry
+                    Thread.sleep(1)
+                    retries++
+                } else {
+                    break // error or closed
+                }
+            }
+            if (totalWritten > 0) {
+                val bytesPerFrame = channels * 2
+                totalFramesWritten += (totalWritten / bytesPerFrame)
+            }
+            totalWritten
+        } catch (e: Exception) {
+            Log.e(TAG, "Safe writePcm exception ignored", e)
+            0
         }
-        if (totalWritten > 0) {
-            val bytesPerFrame = channels * 2
-            totalFramesWritten += (totalWritten / bytesPerFrame)
-        }
-        return totalWritten
     }
 
     fun getPlaybackHeadPositionFrames(): Long {
-        return (audioTrack?.playbackHeadPosition?.toLong() ?: 0L) and 0xFFFFFFFFL
+        return try {
+            (audioTrack?.playbackHeadPosition?.toLong() ?: 0L) and 0xFFFFFFFFL
+        } catch (e: Exception) {
+            0L
+        }
     }
 
     fun getUnplayedFrames(): Long {

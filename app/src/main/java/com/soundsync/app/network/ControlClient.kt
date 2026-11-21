@@ -57,15 +57,26 @@ class ControlClient(
     private var ntpJob: Job? = null
     private var telemetryJob: Job? = null
 
+    private var isExplicitDisconnect = false
+    private var reconnectAttempts = 0
+
     fun connect(masterIp: String, port: Int = 8889, pin: String? = null, scope: CoroutineScope) {
-        disconnect()
+        isExplicitDisconnect = false
+        reconnectAttempts = 0
+        connectInternal(masterIp, port, pin, scope)
+    }
+
+    private fun connectInternal(masterIp: String, port: Int, pin: String?, scope: CoroutineScope) {
+        disconnectInternal(keepConnectingState = true)
 
         _connectionState.value = ConnectionState.CONNECTING
         StreamStateHolder.slaveConnectionState.value = ConnectionState.CONNECTING
 
         listenJob = scope.launch(Dispatchers.IO) {
             try {
-                val sock = Socket(masterIp, port)
+                // 4.5 second connect timeout prevents hanging when connecting to invalid/unreachable IP
+                val sock = Socket()
+                sock.connect(java.net.InetSocketAddress(masterIp, port), 4500)
                 socket = sock
                 reader = BufferedReader(InputStreamReader(sock.getInputStream()))
                 writer = PrintWriter(sock.getOutputStream(), true)
@@ -78,6 +89,8 @@ class ControlClient(
                     pin = pin
                 )
                 writer?.println(handshake.toJson())
+                writer?.flush()
+                reconnectAttempts = 0 // Reset on successful socket connection
 
                 while (isActive) {
                     val line = reader?.readLine() ?: break
@@ -86,11 +99,24 @@ class ControlClient(
                 }
             } catch (e: Exception) {
                 if (isActive) {
-                    Log.e(TAG, "Connection error to $masterIp", e)
-                    _connectionState.value = ConnectionState.ERROR
+                    Log.w(TAG, "Connection event to $masterIp: ${e.message}")
                 }
             } finally {
                 disconnectInternal()
+                // Auto-reconnect if dropped unexpectedly (e.g. Wi-Fi blip or router channel change)
+                if (!isExplicitDisconnect && reconnectAttempts < 3 && isActive) {
+                    reconnectAttempts++
+                    Log.d(TAG, "Attempting auto-reconnect #$reconnectAttempts in 2s...")
+                    _connectionState.value = ConnectionState.CONNECTING
+                    StreamStateHolder.slaveConnectionState.value = ConnectionState.CONNECTING
+                    delay(2000)
+                    if (!isExplicitDisconnect && isActive) {
+                        connectInternal(masterIp, port, pin, scope)
+                    }
+                } else if (!isExplicitDisconnect) {
+                    _connectionState.value = ConnectionState.ERROR
+                    StreamStateHolder.slaveConnectionState.value = ConnectionState.ERROR
+                }
             }
         }
     }
@@ -196,10 +222,11 @@ class ControlClient(
     }
 
     fun disconnect() {
+        isExplicitDisconnect = true
         disconnectInternal()
     }
 
-    private fun disconnectInternal() {
+    private fun disconnectInternal(keepConnectingState: Boolean = false) {
         ntpJob?.cancel()
         ntpJob = null
         telemetryJob?.cancel()
@@ -217,7 +244,7 @@ class ControlClient(
             // ignore
         }
         socket = null
-        if (_connectionState.value != ConnectionState.REJECTED) {
+        if (!keepConnectingState && _connectionState.value != ConnectionState.REJECTED) {
             _connectionState.value = ConnectionState.DISCONNECTED
             StreamStateHolder.slaveConnectionState.value = ConnectionState.DISCONNECTED
         }
