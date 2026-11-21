@@ -54,6 +54,10 @@ class AudioStreamService : Service() {
         const val ACTION_PAUSE = "com.soundsync.app.ACTION_PAUSE"
         const val ACTION_START_MASTER = "com.soundsync.app.ACTION_START_MASTER"
         const val ACTION_START_SLAVE = "com.soundsync.app.ACTION_START_SLAVE"
+        const val ACTION_START_PROJECTION = "com.soundsync.app.ACTION_START_PROJECTION"
+
+        const val EXTRA_RESULT_CODE = "com.soundsync.app.EXTRA_RESULT_CODE"
+        const val EXTRA_RESULT_DATA = "com.soundsync.app.EXTRA_RESULT_DATA"
 
         var instance: AudioStreamService? = null
             private set
@@ -119,6 +123,18 @@ class AudioStreamService : Service() {
                 val pin = intent.getStringExtra("PIN")
                 startAsSlave(name, masterIp, pin)
             }
+            ACTION_START_PROJECTION -> {
+                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, android.app.Activity.RESULT_CANCELED)
+                val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(EXTRA_RESULT_DATA)
+                }
+                if (resultCode == android.app.Activity.RESULT_OK && resultData != null) {
+                    handleStartProjection(resultCode, resultData)
+                }
+            }
         }
         return START_NOT_STICKY
     }
@@ -161,6 +177,41 @@ class AudioStreamService : Service() {
                     audioSender.sendPacket(packet)
                 }
             }
+        }
+    }
+
+    fun handleStartProjection(resultCode: Int, resultData: Intent) {
+        try {
+            startForegroundServiceNotification("SoundSync Master - Streaming", "Streaming system audio", withMediaProjection = true)
+
+            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? android.media.projection.MediaProjectionManager
+            val projection = projectionManager?.getMediaProjection(resultCode, resultData)
+
+            if (projection != null) {
+                projection.registerCallback(object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        Log.d(TAG, "MediaProjection stopped by system")
+                        activeMediaProjection = null
+                        captureManager.stopCapture()
+                        _isStreaming.value = false
+                        updateNotification()
+                    }
+                }, android.os.Handler(android.os.Looper.getMainLooper()))
+
+                activeMediaProjection = projection
+                captureManager.startSystemAudioCapture(projection, StreamQualityPreset.BALANCED, serviceScope)
+            } else {
+                captureManager.startTestPulseOnly(StreamQualityPreset.BALANCED, serviceScope)
+            }
+
+            controlServer?.broadcastStartStream(leadTimeMs = StreamQualityPreset.BALANCED.bufferTargetMs, preset = StreamQualityPreset.BALANCED)
+            _isStreaming.value = true
+            updateNotification()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start MediaProjection in service", e)
+            captureManager.startTestPulseOnly(StreamQualityPreset.BALANCED, serviceScope)
+            _isStreaming.value = true
+            updateNotification()
         }
     }
 

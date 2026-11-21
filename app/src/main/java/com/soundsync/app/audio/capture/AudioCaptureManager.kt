@@ -110,8 +110,10 @@ class AudioCaptureManager {
                     .build()
 
                 if (record.state != AudioRecord.STATE_INITIALIZED) {
-                    _captureState.value = CaptureState.ERROR
-                    _statusMessage.value = "AudioRecord failed to initialize. Third-party capture restricted."
+                    Log.w(TAG, "AudioRecord not initialized, falling back to sync pulses")
+                    _captureState.value = CaptureState.RESTRICTED
+                    _statusMessage.value = "Audio capture restricted; emitting sync test pulses"
+                    startTestPulseOnly(preset, scope)
                     return@launch
                 }
 
@@ -160,11 +162,13 @@ class AudioCaptureManager {
             } catch (e: SecurityException) {
                 Log.e(TAG, "SecurityException starting audio capture", e)
                 _captureState.value = CaptureState.RESTRICTED
-                _statusMessage.value = "Capture blocked by security policy: ${e.localizedMessage}"
+                _statusMessage.value = "Capture restricted: ${e.localizedMessage}"
+                startTestPulseOnly(preset, scope)
             } catch (e: Exception) {
                 Log.e(TAG, "Exception during audio capture", e)
                 _captureState.value = CaptureState.ERROR
-                _statusMessage.value = "Audio capture error: ${e.localizedMessage}"
+                _statusMessage.value = "Audio capture fallback: ${e.localizedMessage}"
+                startTestPulseOnly(preset, scope)
             } finally {
                 cleanUpRecord()
             }

@@ -81,7 +81,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleTestTone() {
         val newActive = !_isTestToneActive.value
         _isTestToneActive.value = newActive
-        AudioStreamService.instance?.captureManager?.isTestToneEnabled = newActive
+        val svc = AudioStreamService.instance
+        if (svc != null) {
+            svc.captureManager.isTestToneEnabled = newActive
+            if (newActive && !svc.isStreaming.value) {
+                svc.startMasterStreaming(_selectedPreset.value)
+            }
+        }
     }
 
     fun startMaster(mediaProjection: MediaProjection? = null) {

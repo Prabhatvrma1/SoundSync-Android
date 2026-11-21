@@ -45,10 +45,16 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val projection = projectionManager.getMediaProjection(result.resultCode, result.data!!)
-            viewModel.startMaster(projection)
-            viewModel.startMasterStreaming()
+            val serviceIntent = Intent(this, AudioStreamService::class.java).apply {
+                action = AudioStreamService.ACTION_START_PROJECTION
+                putExtra(AudioStreamService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(AudioStreamService.EXTRA_RESULT_DATA, result.data)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
         }
     }
 
