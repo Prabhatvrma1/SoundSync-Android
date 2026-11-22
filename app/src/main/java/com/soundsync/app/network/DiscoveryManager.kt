@@ -110,8 +110,17 @@ class DiscoveryManager(private val context: Context) {
                     )
                     val json = gson.toJson(beacon)
                     val bytes = json.toByteArray()
-                    val packet = DatagramPacket(bytes, bytes.size, broadcastAddr, BEACON_PORT)
-                    socket.send(packet)
+                    try {
+                        socket.send(DatagramPacket(bytes, bytes.size, broadcastAddr, BEACON_PORT))
+                    } catch (_: Exception) {}
+
+                    // Also broadcast to 255.255.255.255 for broader receiver compatibility
+                    if (broadcastAddr.hostAddress != "255.255.255.255") {
+                        try {
+                            val globalBroadcast = java.net.InetAddress.getByName("255.255.255.255")
+                            socket.send(DatagramPacket(bytes, bytes.size, globalBroadcast, BEACON_PORT))
+                        } catch (_: Exception) {}
+                    }
                     delay(1500)
                 }
             } catch (e: Exception) {

@@ -118,10 +118,10 @@ fun SlaveScreen(
     var manualIpInput by remember { mutableStateOf("") }
     var manualPinInput by remember { mutableStateOf("7294") }
     var showManualConnect by remember { mutableStateOf(false) }
-    var gatewayIp by remember { mutableStateOf(NetworkUtils.getActiveGatewayIp(context)) }
-    var usbGatewayIp by remember { mutableStateOf(NetworkUtils.getUsbGatewayIp(context)) }
-    var isUsbActive by remember { mutableStateOf(NetworkUtils.isUsbTetheringActive()) }
-    var usbDetails by remember { mutableStateOf(NetworkUtils.getUsbInterfaceDetails()) }
+    var gatewayIp by remember { mutableStateOf<String>(NetworkUtils.getActiveGatewayIp(context)) }
+    var usbGatewayIp by remember { mutableStateOf<String>(NetworkUtils.getUsbGatewayIp(context)) }
+    var isUsbActive by remember { mutableStateOf<Boolean>(NetworkUtils.isUsbTetheringActive()) }
+    var usbDetails by remember { mutableStateOf<String>(NetworkUtils.getUsbInterfaceDetails()) }
 
     val scanLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         com.journeyapps.barcodescanner.ScanContract()
